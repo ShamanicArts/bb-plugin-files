@@ -495,9 +495,11 @@ function EntryList({
     <div
       className={`ff-entries ff-${view}`}
       ref={listRef}
-      onScroll={(e) =>
-        setViewport((v) => ({ ...v, top: e.currentTarget.scrollTop }))
-      }
+      onScroll={(e) => {
+        // React clears currentTarget after dispatch; state updaters can run later.
+        const top = e.currentTarget.scrollTop;
+        setViewport((v) => ({ ...v, top }));
+      }}
       role="listbox"
       aria-label="Files and folders"
       aria-multiselectable="true"

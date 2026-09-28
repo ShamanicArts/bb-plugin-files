@@ -6,7 +6,7 @@ Built and installed as `files@0.1.0` against BB Plugin SDK 0.4.101, from `/home/
 
 - `npm run typecheck`
 - `npm test`: 12 tests covering file and relative-path navigation, percent-encoded file URLs, hidden entries, symlinks, bounded text/binary reads, host schema validation, mutation detection, sparse 2 GiB reads, range parsing, exact response bodies, HEAD, backpressure, abort, cleanup, and If-Range.
-- `npm run test:ui`: 5 headless Chromium workflows covering navigation, history, filtering, hidden files, range selection, quick look/Escape, editable paths, error retention, columns, virtualized grids, keyboard navigation, narrow layouts and preserving the folder across BB's responsive remount.
+- `npm run test:ui`: 6 headless Chromium workflows covering navigation, history, filtering, hidden files, range selection, quick look/Escape, editable paths, error retention, columns, virtualized grids, keyboard navigation, narrow layouts and preserving the folder across BB's responsive remount.
 - The opt-in native browser workflow performs 12 consecutive video play → seek → close cycles and asserts the detached player is paused and its source removed. No page errors.
 - Real thread-panel launch starts at that thread's environment directory. Source, column, and image previews checked at 609 px panel width without visible desktop launches.
 - Connected-host directory listings checked on wubulon, chatgpt-dev, and warmap.
@@ -51,3 +51,10 @@ FILES_VIDEO_TEST_PATH=/home/shamanic/dev/warmap/Workspaces/battle-locomotion-str
 The invisible matching-Electron smoke test is retained under `artifacts/video-diagnosis/safe-check.mjs`. It checks WebM and MP4 playback/seek with zero native video elements. Hidden windows do not validate the user's visible compositor symptom. The earlier native test had a stale-element navigation race; those initial timeouts were discarded, and all later tests wait for initialization and replacement.
 
 [Compatibility player screenshot](artifacts/compatibility-player.png). Preview tradeoffs: FFmpeg/ffprobe on the file host, at most 1280×720 / 24 fps, JPEG transport bandwidth, and frame dropping on slow connections. Native playback is opt-in and remains exposed to the underlying desktop bug.
+
+
+## Folder scrolling crash — 0.2.1
+
+Reproduced against the installed plugin using `npx playwright test -g 'wheel scrolling folder'`: wheel scrolling a directory containing 240 folders removed the file browser and emitted `TypeError: Cannot read properties of null (reading 'scrollTop')` from the EntryList state updater. No recent system coredump or OOM kill was found in the same investigation; the reproduced failure is a React UI exception.
+
+The handler captured the React event inside a deferred functional state update. React clears `currentTarget` after dispatch. Capturing the numeric scroll position synchronously fixes that lifetime error. The same regression test now passes wheel scrolling down/up and opening folders afterward in list, grid, and column views, with no console or page errors. Existing keyboard-only virtualization tests did not exercise this path.

@@ -294,3 +294,62 @@ test("compatibility video renders moving frames, seeks, pauses and releases audi
     ),
   ).toBe(true);
 });
+
+test("wheel scrolling folder lists keeps the application responsive in every view", async ({
+  page,
+}) => {
+  const root = join(fixture, "Scrollable folders");
+  await mkdir(root, { recursive: true });
+  await Promise.all(
+    Array.from({ length: 240 }, (_, i) =>
+      mkdir(join(root, `folder-${String(i).padStart(3, "0")}`), {
+        recursive: true,
+      }),
+    ),
+  );
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  await go(page, root);
+  for (const [view, shortcut] of [
+    ["List", 1],
+    ["Grid", 2],
+    ["Column", 3],
+  ] as const) {
+    await page
+      .getByRole("button", {
+        name: `${view} view (Ctrl+${shortcut})`,
+        exact: true,
+      })
+      .click();
+    const list = page.getByRole("listbox", {
+      name: "Files and folders",
+      exact: true,
+    });
+    await expect(
+      list.getByRole("option", { name: /^folder-000/ }),
+    ).toBeVisible();
+    await list.hover();
+    await page.mouse.wheel(0, 1200);
+    await expect
+      .poll(() => list.evaluate((el) => el.scrollTop))
+      .toBeGreaterThan(0);
+    for (let i = 0; i < 5; i++) await page.mouse.wheel(0, 500);
+    await expect(list).toBeVisible();
+    await expect(
+      page.getByLabel("File or folder path", { exact: true }),
+    ).toHaveValue(root);
+    await page.mouse.wheel(0, -100000);
+    await expect(
+      list.getByRole("option", { name: /^folder-000/ }),
+    ).toBeVisible();
+    await list.getByRole("option", { name: /^folder-000/ }).dblclick();
+    await expect(
+      page.getByLabel("File or folder path", { exact: true }),
+    ).toHaveValue(join(root, "folder-000"));
+    await go(page, root);
+  }
+  expect(errors).toEqual([]);
+});
