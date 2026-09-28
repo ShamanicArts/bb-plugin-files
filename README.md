@@ -32,11 +32,13 @@ Shortcuts apply while focus is inside Files. Text and native media controls reta
 
 ## Media architecture
 
-Video and audio do **not** use BB's built-in preview loader. In the tested BB installation its `/file-previews` route ignored `Range` and buffered the entire file. Files instead issues a temporary media lease via its typed RPC, then serves an authenticated plugin HTTP endpoint with `HEAD`, HTTP 206, open/suffix ranges, 416 for unsatisfiable ranges, and `If-Range` handling.
+Video defaults to **Compatibility playback**. FFmpeg on the file's machine decodes in a separate subprocess; the panel draws JPEG frames on a canvas and schedules raw stereo PCM through Web Audio. It never creates an HTML video element in this mode. This bypasses the native video surface associated with the reported Arch BB desktop flicker and input freeze. It is a plugin workaround, not a fix to BB or the graphics driver.
 
-A host worker reads at most 256 KiB per request. The response pulls one chunk at a time with backpressure, and propagates cancellation to host RPC. File identity is checked for each chunk; a changed file stops playback rather than mixing versions. Worker file handles close after every read. Closing or replacing a player pauses it and clears its source. Plugin reload aborts active streams. At most eight media responses stream concurrently; expired leases are bounded and evicted. No video thumbnails, autoplay, transcoding, or whole-video blobs are used.
+Compatibility previews are capped at 1280×720 and 24 fps, with stereo 48 kHz sound. The actual displayed frame rate depends on host speed and network latency. `ffmpeg` and `ffprobe` must be available on each file host's PATH. Missing tools produce an actionable error; Files never silently falls back to native video. Play/pause, seeking, volume, expanded preview and downloads remain available. **Use native player** explicitly opts into the original browser player, which can still trigger the reported desktop issue.
 
-This avoids the verified whole-file buffering failure. Playback still depends on the browser's codec and hardware decoder support; unsupported formats show an error and offer download. Chromium playback and seeking were checked locally and from a second connected host. Remote Connect access and every desktop GPU/codec combination have not been exhaustively validated.
+Playback retains a host worker only while a session exists. Pause, close, switching files and seeking stop the old decoder and release audio contexts/bitmaps. Hidden documents pause playback. Abandoned sessions expire after ten seconds without polling; at most four decoders and four preparation jobs run on a host. JPEG frames, PCM queues and RPC replies are bounded. Slow clients drop video frames; audio backlog fails with a retry message instead of growing without limit. Preparation has a 15-second timeout. Plugin host disposal stops children.
+
+Native audio, opt-in native video and downloads use a temporary media lease with `HEAD`, HTTP 206, open/suffix byte ranges, 416 and `If-Range`. Each host read is at most 256 KiB and checked against the file identity. Streams have backpressure, cancellation, bounded leases and an eight-response concurrency cap. BB's built-in `/file-previews` loader is not used for these streams: the tested core route ignored Range and buffered the whole file.
 
 Images use BB's confined preview URLs. Grid thumbnails load lazily and skip originals larger than 10 MiB. Text previews are read-only and capped at 512 KiB. Listings cap at 20,000 entries and disclose truncation. No files are edited, renamed, or deleted by the plugin. Column mode shows the parent directory and current directory, with preview beside or below them depending on panel width.
 
@@ -51,16 +53,20 @@ npm run build
 bb plugin install . --yes
 ```
 
-The frontend uses React/TypeScript and the installed BB theme and source renderer. The host entry is portable Node, distributed by BB to connected machines. There is no Rust/Wasm dependency: the significant work here is filesystem I/O and streaming, where BB's host boundary and browser codecs already operate.
+The frontend uses React/TypeScript and the installed BB theme and source renderer. The host entry is portable Node, distributed by BB to connected machines. There is no Rust/Wasm build dependency: filesystem I/O and media decoding are handled by BB host workers and existing FFmpeg software decoders.
 
 `npm run test:ui` runs headless Chromium against the running BB server (`BB_SERVER_URL`, with a local fallback). The live UI suite uses the local fixture directory under `artifacts/fixtures/Studio`, prepared by `npm run fixtures`; it requires Files installed and loaded. `CHROMIUM_PATH` overrides `/usr/bin/chromium`. It does not launch visible windows or send chat messages.
 
 ## RPC
 
-Inspect contracts with `bb plugin rpc inspect files`. Methods: `context`, `list`, `text`, `preview` (images), and `media` (bounded video/audio stream). For example, save `{"hostId":"<machine-id>","path":"~"}` to an input file and run:
+Inspect contracts with `bb plugin rpc inspect files`. Methods: `context`, `list`, `text`, `preview` (images), `media` (bounded file stream), and `videoInfo`, `videoPoster`, `videoStart`, `videoPoll`, `videoStop` (compatibility playback). For example, save `{"hostId":"<machine-id>","path":"~"}` to an input file and run:
 
 ```sh
 bb plugin rpc call files list --input-file input.json --json
 ```
 
 `context` takes `{threadId, projectId}` (both nullable). `list` takes `{hostId,path,base?}`. `text`, `preview` and `media` take `{hostId,path}`. Media URLs are temporary and remain under BB's normal plugin HTTP authentication. The plugin owns no external service, server port, or credentials.
+
+Compatibility RPC: `videoInfo` takes `{hostId,path}`; `videoPoster` and `videoStart` add a nonnegative `time` in seconds. Start returns an opaque session `id`. `videoPoll` and `videoStop` take `{hostId,id}`. Poll returns a latest JPEG, timestamp, interleaved float32 little-endian stereo PCM, audio timestamp and EOF flag. Poll at roughly 20 Hz while playing, stop on close, and expect idle expiry. These RPCs use BB's existing host transport and authentication; no extra port is exposed.
+
+Tests require FFmpeg/ffprobe. To exercise a specific video in the live compatibility test, set `FILES_VIDEO_TEST_PATH=/absolute/path/to/video.webm` and run `npx playwright test -g 'compatibility video'`.

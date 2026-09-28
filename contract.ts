@@ -28,7 +28,45 @@ export const mediaInfoSchema = z.object({
   modified: z.number(),
   identity: z.string(),
 });
+export const videoInfoSchema = z.object({
+  duration: z.number().positive(),
+  width: z.number().positive(),
+  height: z.number().positive(),
+  audio: z.boolean(),
+  identity: z.string(),
+});
+const videoPathInput = z.object({ path: pathSchema });
+const videoTimeInput = videoPathInput.extend({
+  time: z.number().finite().min(0),
+});
+const videoIdInput = z.object({ id: z.string().uuid() });
+const videoMethods = {
+  videoInfo: { input: videoPathInput, output: videoInfoSchema },
+  videoPoster: {
+    input: videoTimeInput,
+    output: z.object({ jpeg: z.string() }),
+  },
+  videoStart: {
+    input: videoTimeInput,
+    output: videoInfoSchema.extend({ id: z.string() }),
+  },
+  videoPoll: {
+    input: videoIdInput,
+    output: z.object({
+      jpeg: z.string().nullable(),
+      time: z.number(),
+      pcm: z.string(),
+      audioTime: z.number(),
+      done: z.boolean(),
+    }),
+  },
+  videoStop: {
+    input: videoIdInput,
+    output: z.object({ stopped: z.boolean() }),
+  },
+};
 export const hostContract = defineRpcContract({
+  ...videoMethods,
   list: {
     input: z.object({ path: pathSchema, base: z.string().optional() }),
     output: listingSchema,
@@ -54,6 +92,26 @@ export const hostContract = defineRpcContract({
   },
 });
 export const rpcContract = defineRpcContract({
+  videoInfo: {
+    ...videoMethods.videoInfo,
+    input: videoPathInput.extend({ hostId: z.string().min(1) }),
+  },
+  videoPoster: {
+    ...videoMethods.videoPoster,
+    input: videoTimeInput.extend({ hostId: z.string().min(1) }),
+  },
+  videoStart: {
+    ...videoMethods.videoStart,
+    input: videoTimeInput.extend({ hostId: z.string().min(1) }),
+  },
+  videoPoll: {
+    ...videoMethods.videoPoll,
+    input: videoIdInput.extend({ hostId: z.string().min(1) }),
+  },
+  videoStop: {
+    ...videoMethods.videoStop,
+    input: videoIdInput.extend({ hostId: z.string().min(1) }),
+  },
   context: {
     input: z.object({
       threadId: z.string().nullable(),

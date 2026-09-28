@@ -1,5 +1,7 @@
 import type { FileKind } from "./model";
 const paths: Record<string, string> = {
+  play: "m7 4 14 8-14 8Z",
+  pause: "M7 4v16M17 4v16",
   back: "m14 5-7 7 7 7",
   forward: "m10 5 7 7-7 7",
   up: "m5 14 7-7 7 7",

@@ -14,4 +14,4 @@ Rows are 36 px; grid cells are 134 px tall. A wide surface places preview beside
 
 ## Behavior
 
-Single click selects and previews. Double click or Enter opens folders and expands file previews. Space toggles quick look. Preserve selection between view modes. Path errors retain the last good directory. Loading states retain geometry. Native media controls remain familiar, with no autoplay. CSS motion only covers brief loading-opacity feedback and respects reduced motion.
+Single click selects and previews. Double click or Enter opens folders and expands file previews. Space toggles quick look. Preserve selection between view modes. Path errors retain the last good directory. Loading states retain geometry. Video defaults to a canvas preview with play/pause, time, seek and volume controls. Compatibility mode is visible; native video is an explicit opt-in. Audio files retain native controls. No autoplay. CSS motion only covers brief loading-opacity feedback and respects reduced motion.

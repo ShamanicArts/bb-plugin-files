@@ -14,8 +14,9 @@ Methods:
 - `list`: `{hostId, path, base?}` lists one directory with metadata; a file path lists its parent and selects that file. Accepts `~`, relative and absolute paths.
 - `text`: `{hostId, path}` returns up to 512 KiB and flags binary/truncated data.
 - `preview`: `{hostId, path}` creates a confined image preview root; do not use this for video.
+- `videoInfo`, `videoPoster`, `videoStart`, `videoPoll`, `videoStop`: software playback via FFmpeg on the file host. Info takes `{hostId,path}`; poster/start add `time` in seconds; poll/stop take `{hostId,id}` from start. Stop sessions when finished.
 - `media`: `{hostId, path}` creates a temporary video/audio URL supporting HTTP ranges. Stream chunks are bounded at 256 KiB, cancellable and checked for file changes.
 
-The browser is read-only. Copy/Use in chat supplies paths, not uploaded attachments. Listings disclose their 20,000-entry ceiling. Video decoding is browser-dependent; do not claim universal codec or GPU reliability.
+The browser is read-only. Copy/Use in chat supplies paths, not uploaded attachments. Listings disclose their 20,000-entry ceiling. Videos default to FFmpeg software decoding on the host, canvas frames and Web Audio; `ffmpeg` and `ffprobe` must exist on that host. Preview output is capped at 720p/24 fps. Native video is explicit opt-in and can still trigger the Arch desktop flicker. Do not describe the workaround as fixing BB itself or claim universal GPU reliability.
 
 Build/reload using `bb plugin build <path>` and `bb plugin reload files`. Inspect failures using `bb plugin logs files`.

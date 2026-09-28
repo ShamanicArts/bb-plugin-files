@@ -9,6 +9,16 @@ export default function plugin(bb: BbPluginApi) {
   bb.rpc.register(
     rpcContract,
     {
+      videoInfo: ({ hostId, ...input }) =>
+        host.call("videoInfo", input, { hostId, timeoutMs: 20000 }),
+      videoPoster: ({ hostId, ...input }) =>
+        host.call("videoPoster", input, { hostId, timeoutMs: 20000 }),
+      videoStart: ({ hostId, ...input }) =>
+        host.call("videoStart", input, { hostId, timeoutMs: 20000 }),
+      videoPoll: ({ hostId, ...input }) =>
+        host.call("videoPoll", input, { hostId }),
+      videoStop: ({ hostId, ...input }) =>
+        host.call("videoStop", input, { hostId }),
       context: async ({ threadId, projectId }) => {
         const [hosts, config] = await Promise.all([
           bb.sdk.hosts.list(),

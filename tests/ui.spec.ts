@@ -120,7 +120,7 @@ test("column navigation and grid virtualization stay keyboard accessible", async
   await page.keyboard.press("Control+a");
   await expect(page.locator(".ff-status")).toContainText("400 selected");
 });
-test("video plays, seeks, and releases the old element on repeated close", async ({
+test("opt-in native player releases the old element on repeated close", async ({
   page,
 }) => {
   test.setTimeout(60000);
@@ -132,6 +132,9 @@ test("video plays, seeks, and releases the old element on repeated close", async
     .click();
   for (let i = 0; i < 12; i++) {
     await page.getByRole("option", { name: /playback-check.mp4/ }).click();
+    await page
+      .getByRole("button", { name: "Use native player", exact: true })
+      .click();
     const v = page.locator(".ff-browser video");
     await expect(v).toBeVisible();
     await page.waitForFunction(() => {
@@ -192,4 +195,102 @@ test("narrow view remains usable without horizontal overflow", async ({
   await page
     .locator(".ff-browser")
     .screenshot({ path: "artifacts/narrow-images.png" });
+});
+
+test("compatibility video renders moving frames, seeks, pauses and releases audio", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  await page.addInitScript(() => {
+    const w = window as typeof window & {
+      audioChecks: { contexts: AudioContext[]; samples: number };
+    };
+    w.audioChecks = { contexts: [], samples: 0 };
+    const Original = window.AudioContext;
+    window.AudioContext = class extends Original {
+      constructor(options?: AudioContextOptions) {
+        super(options);
+        w.audioChecks.contexts.push(this);
+      }
+      createBufferSource() {
+        const source = super.createBufferSource();
+        const start = source.start.bind(source);
+        source.start = (when = 0, offset = 0, duration?: number) => {
+          if (source.buffer?.getChannelData(0).some((v) => Math.abs(v) > 0.001))
+            w.audioChecks.samples++;
+          start(when, offset, duration);
+        };
+        return source;
+      }
+    };
+  });
+  await page.reload();
+  await expect(page.locator(".ff-content")).toHaveAttribute(
+    "aria-busy",
+    "false",
+  );
+  await expect(
+    page.getByLabel("File or folder path", { exact: true }),
+  ).not.toHaveValue("");
+  const file =
+    process.env.FILES_VIDEO_TEST_PATH ||
+    join(fixture, "Exports", "playback-check.mp4");
+  await go(page, file);
+  const player = page.locator(".ff-safe-video");
+  const canvas = player.locator("canvas");
+  await expect(canvas).toBeVisible();
+  await expect(player.locator('[role="status"]')).toHaveCount(0);
+  await expect(page.locator("video")).toHaveCount(0);
+  const frame = () => canvas.evaluate((c) => c.toDataURL());
+  const poster = await frame();
+  for (let i = 0; i < 3; i++) {
+    await page
+      .getByRole("button", { name: "Play video", exact: true })
+      .first()
+      .click();
+    await expect(player).toHaveAttribute("data-playing", "true");
+    await page.waitForFunction(
+      () =>
+        Number(
+          document.querySelector(".ff-safe-video")?.getAttribute("data-time"),
+        ) > 0.5,
+    );
+    await page
+      .getByLabel("Video position", { exact: true })
+      .fill(String(5 + i));
+    await page.waitForFunction(
+      (t) =>
+        Number(
+          document.querySelector(".ff-safe-video")?.getAttribute("data-time"),
+        ) >
+        t + 0.3,
+      5 + i,
+    );
+    await page
+      .getByRole("button", { name: "Pause video", exact: true })
+      .click();
+    await expect(player).toHaveAttribute("data-playing", "false");
+    const paused = await frame();
+    expect(paused).not.toEqual(poster);
+    await page.waitForTimeout(200);
+    expect(await frame()).toEqual(paused);
+    await expect(page.locator("video")).toHaveCount(0);
+  }
+  await page.screenshot({ path: "artifacts/compatibility-player.png" });
+  if (!process.env.FILES_VIDEO_TEST_PATH) {
+    expect(
+      await page.evaluate(() => (window as any).audioChecks.samples),
+    ).toBeGreaterThan(0);
+  }
+  await page
+    .getByRole("button", { name: "Close preview (Escape)", exact: true })
+    .click();
+  await expect(player).toHaveCount(0);
+  expect(
+    await page.evaluate(() =>
+      (window as any).audioChecks.contexts.every(
+        (c: AudioContext) => c.state === "closed",
+      ),
+    ),
+  ).toBe(true);
 });

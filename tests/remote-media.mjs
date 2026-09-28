@@ -63,31 +63,37 @@ try {
   await page
     .getByRole("textbox", { name: "File or folder path", exact: true })
     .press("Enter");
+  await page.locator(".ff-safe-video canvas").waitFor();
   await page.waitForFunction(
-    () => document.querySelector(".ff-browser video")?.readyState >= 2,
+    () => !document.querySelector(".ff-video-progress"),
   );
-  const v = page.locator(".ff-browser video");
-  await v.evaluate((v) => v.play());
-  await page.waitForTimeout(600);
-  assert(await v.evaluate((v) => v.currentTime > 0));
-  await v.evaluate((v) => {
-    v.currentTime = 8;
-  });
-  await page.waitForFunction(() => {
-    const v = document.querySelector(".ff-browser video");
-    return v.currentTime >= 8 && !v.seeking;
-  });
-  await v.evaluate((v) => v.pause());
+  await page
+    .getByRole("button", { name: "Play video", exact: true })
+    .first()
+    .click();
+  await page.waitForFunction(
+    () =>
+      Number(
+        document.querySelector(".ff-safe-video")?.getAttribute("data-time"),
+      ) > 0.5,
+  );
+  await page.getByLabel("Video position", { exact: true }).fill("8");
+  await page.waitForFunction(
+    () =>
+      Number(
+        document.querySelector(".ff-safe-video")?.getAttribute("data-time"),
+      ) > 8.5,
+  );
+  await page.getByRole("button", { name: "Pause video", exact: true }).click();
+  assert.equal(await page.locator("video").count(), 0);
   const result = {
     host: "chatgpt-dev",
     rangeStatus: r.status,
     rangeBytes: 1024,
-    player: await v.evaluate((v) => ({
-      duration: v.duration,
-      time: v.currentTime,
-      width: v.videoWidth,
-      error: v.error,
-    })),
+    player: {
+      mode: "compatibility",
+      time: await page.locator(".ff-safe-video").getAttribute("data-time"),
+    },
     pageErrors: errors,
   };
   await writeFile(

@@ -29,6 +29,7 @@ import {
   savePreference,
 } from "./model";
 import { Glyph, FileGlyph } from "./icons";
+import { SafeVideo } from "./safe-video";
 import "./app.css";
 type View = "list" | "grid" | "columns";
 type Location = { hostId: string; path: string };
@@ -183,6 +184,7 @@ function Preview({
   const [error, setError] = useState("");
   const [wrap, setWrap] = useState(false);
   const [zoom, setZoom] = useState(false);
+  const [nativeVideo, setNativeVideo] = useState(false);
   const [mediaError, setMediaError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
@@ -276,7 +278,15 @@ function Preview({
             <p>This entry is not a regular file.</p>
           </div>
         ) : isMedia ? (
-          url ? (
+          kind === "video" && !nativeVideo ? (
+            <SafeVideo
+              key={`${entry.modified}:${entry.size}`}
+              hostId={hostId}
+              path={entry.path}
+              name={entry.name}
+              onNative={() => setNativeVideo(true)}
+            />
+          ) : url ? (
             <>
               {kind === "image" && (
                 <img
@@ -294,6 +304,14 @@ function Preview({
                   name={entry.name}
                   onError={() => setMediaError(true)}
                 />
+              )}
+              {kind === "video" && nativeVideo && (
+                <button
+                  className="ff-native-return"
+                  onClick={() => setNativeVideo(false)}
+                >
+                  Use compatibility playback
+                </button>
               )}
               {mediaError && (
                 <div className="ff-media-error" role="alert">
