@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, mkdtemp, copyFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 const fixture = join(process.cwd(), "artifacts", "fixtures", "Studio");
 test.beforeAll(async () => {
@@ -352,4 +352,151 @@ test("wheel scrolling folder lists keeps the application responsive in every vie
     await go(page, root);
   }
   expect(errors).toEqual([]);
+});
+
+test("HTML renders interactive local assets in a sandbox and can switch to source", async ({
+  page,
+}) => {
+  const root = join(fixture, "HTML");
+  await mkdir(join(root, "assets"), { recursive: true });
+  await writeFile(
+    join(root, "assets", "app.js"),
+    `document.querySelector('button').onclick=()=>document.querySelector('output').textContent='Clicked';try{parent.document.body;document.body.dataset.isolation='unsafe'}catch{document.body.dataset.isolation='blocked'}`,
+  );
+  await writeFile(
+    join(root, "index.html"),
+    `<!doctype html><html><head><title>Local report</title></head><body><h1>Interactive report</h1><button>Run demo</button><output>Ready</output><script src="assets/app.js"></script><video src="blocked.webm" autoplay muted></video></body></html>`,
+  );
+  const mediaRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("blocked.webm"))
+      mediaRequests.push(request.url());
+  });
+  await go(page, join(root, "index.html"));
+  const frame = page.frameLocator('iframe[title="HTML preview of index.html"]');
+  await expect(
+    frame.getByRole("heading", { name: "Interactive report" }),
+  ).toBeVisible();
+  await expect(frame.locator("body")).toHaveAttribute(
+    "data-isolation",
+    "blocked",
+  );
+  await frame.getByRole("button", { name: "Run demo" }).click();
+  await expect(frame.locator("output")).toHaveText("Clicked");
+  expect(mediaRequests).toEqual([]);
+  await page.getByRole("button", { name: "View source", exact: true }).click();
+  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator(".ff-source")).toContainText("Interactive report");
+  await page.getByRole("button", { name: "Render HTML", exact: true }).click();
+  await expect(
+    frame.getByRole("heading", { name: "Interactive report" }),
+  ).toBeVisible();
+});
+
+test("BB file tabs use Files by default for HTML, source and compatibility video", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  const threadId = process.env.BB_THREAD_ID;
+  test.skip(
+    !threadId,
+    "Set BB_THREAD_ID to exercise BB's live file-opener routing.",
+  );
+  const response = await page.request.post(
+    "/api/v1/plugins/files/rpc/context",
+    { data: { threadId, projectId: null } },
+  );
+  const context = (await response.json()).result;
+  const openerRoot = await mkdtemp(join(context.path, "files-opener-test-"));
+  await writeFile(
+    join(openerRoot, "index.html"),
+    "<h1>Interactive report</h1>",
+  );
+  await copyFile(
+    join(fixture, "Sources/browser.tsx"),
+    join(openerRoot, "browser.tsx"),
+  );
+  await copyFile(
+    join(fixture, "Exports/playback-check.mp4"),
+    join(openerRoot, "playback-check.mp4"),
+  );
+  try {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    for (const file of [
+      "index.html",
+      "browser.tsx",
+      "playback-check.mp4",
+      "builtin:index.html",
+    ]) {
+      const builtin = file.startsWith("builtin:");
+      const filename = file.replace("builtin:", "");
+      const path = openerRoot.split("/").at(-1)! + "/" + filename;
+      await page.evaluate(
+        (builtin) =>
+          localStorage.setItem(
+            "bb.fileOpenerByExtension",
+            JSON.stringify(builtin ? { html: "__builtin__" } : {}),
+          ),
+        builtin,
+      );
+      await page.goto(`/threads/${threadId}`);
+      const show = page.getByRole("button", {
+        name: "Show right panel (Ctrl + J)",
+        exact: true,
+      });
+      await expect(
+        page.getByRole("button", {
+          name: /(?:Show|Hide) right panel \(Ctrl \+ J\)/,
+        }),
+      ).toBeVisible();
+      if (await show.isVisible()) await show.click();
+      await page
+        .getByRole("button", { name: "Open new tab (Ctrl + T)", exact: true })
+        .click();
+      const search = page.getByRole("combobox", { name: /Search files/ });
+      await search.fill(path);
+      await expect(
+        page.getByRole("option").filter({ hasText: filename }).first(),
+      ).toBeVisible();
+      await search.press("Enter");
+      if (builtin) {
+        await expect(
+          page.getByRole("button", { name: filename, exact: true }).last(),
+        ).toBeVisible();
+        await expect(page.locator(".ff-browser")).toHaveCount(0);
+      } else {
+        await expect(page.locator(".ff-browser")).toBeVisible();
+        await expect(page.locator(".ff-preview")).toHaveClass(/ff-expanded/);
+        if (file.endsWith(".html")) {
+          await expect(
+            page
+              .frameLocator('iframe[title="HTML preview of index.html"]')
+              .getByRole("heading", { name: "Interactive report" }),
+          ).toBeVisible();
+        } else if (file.endsWith(".tsx")) {
+          await expect(page.locator(".ff-source")).toContainText(
+            "definePluginApp",
+          );
+        } else {
+          await expect(page.locator(".ff-safe-video canvas")).toBeVisible();
+          await expect(page.locator("video")).toHaveCount(0);
+        }
+      }
+      await page
+        .getByRole("button", { name: filename, exact: true })
+        .last()
+        .hover();
+      await page
+        .getByRole("button", {
+          name: `Close ${filename}`,
+          exact: true,
+        })
+        .last()
+        .click();
+    }
+    expect(errors).toEqual([]);
+  } finally {
+    await rm(openerRoot, { recursive: true, force: true });
+  }
 });

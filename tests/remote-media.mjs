@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
-import { chromium } from "@playwright/test";
-const origin = "http://127.0.0.1:38886";
+import { chromium, expect } from "@playwright/test";
+const origin = process.env.BB_SERVER_URL;
+if (!origin) throw new Error("Set BB_SERVER_URL to a running BB server.");
 async function api(path, input) {
   const r = await fetch(origin + path, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
+    signal: AbortSignal.timeout(30000),
   });
   if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
   return r.json();
@@ -16,13 +18,17 @@ async function rpc(method, input) {
   if (!j.ok) throw new Error(JSON.stringify(j));
   return j.result;
 }
-const hostId = "host_wvp6ayipbf";
+const hostId = process.env.FILES_REMOTE_HOST_ID;
+if (!hostId)
+  throw new Error(
+    "Set FILES_REMOTE_HOST_ID to a connected Unix host with FFmpeg.",
+  );
 const path = `/tmp/bb-files-playback-test-${Date.now()}.mp4`;
 const source = await readFile(
   "artifacts/fixtures/Studio/Exports/playback-check.mp4",
 );
 const browser = await chromium.launch({
-  executablePath: "/usr/bin/chromium",
+  executablePath: process.env.CHROMIUM_PATH || "/usr/bin/chromium",
   headless: true,
   args: ["--no-sandbox"],
 });
@@ -53,9 +59,20 @@ try {
     .getByRole("textbox", { name: "File or folder path", exact: true })
     .waitFor();
   await page.waitForTimeout(800);
+  const remoteListing = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/rpc/list") &&
+      response.request().postDataJSON()?.hostId === hostId,
+  );
   await page.getByLabel("Machine", { exact: true }).selectOption(hostId);
+  const home = (await (await remoteListing).json()).result.path;
+  await expect(
+    page.getByLabel("File or folder path", { exact: true }),
+  ).toHaveValue(home);
   await page.waitForFunction(
-    () => document.querySelector(".ff-address input")?.value === "/home/exedev",
+    () =>
+      document.querySelector(".ff-content")?.getAttribute("aria-busy") ===
+      "false",
   );
   await page
     .getByRole("textbox", { name: "File or folder path", exact: true })
@@ -78,16 +95,24 @@ try {
       ) > 0.5,
   );
   await page.getByLabel("Video position", { exact: true }).fill("8");
-  await page.waitForFunction(
-    () =>
-      Number(
-        document.querySelector(".ff-safe-video")?.getAttribute("data-time"),
-      ) > 8.5,
-  );
+  try {
+    await page.waitForFunction(
+      () =>
+        Number(
+          document.querySelector(".ff-safe-video")?.getAttribute("data-time"),
+        ) > 8.5,
+    );
+  } catch (error) {
+    console.error(
+      "Remote player state:",
+      await page.locator(".ff-safe-video").innerText(),
+    );
+    throw error;
+  }
   await page.getByRole("button", { name: "Pause video", exact: true }).click();
   assert.equal(await page.locator("video").count(), 0);
   const result = {
-    host: "chatgpt-dev",
+    host: hostId,
     rangeStatus: r.status,
     rangeBytes: 1024,
     player: {

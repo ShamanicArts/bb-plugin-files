@@ -1,60 +1,33 @@
-# Verification: 28 September 2026
+# Release verification
 
-Built and installed as `files@0.1.0` against BB Plugin SDK 0.4.101, from `/home/shamanic/dev/bb-plugin-files`. The package has no runtime dependency beyond Zod; React and the source renderer are BB runtime shims.
+Files 0.3.0 is built against BB 0.44.0 and Plugin SDK 0.5.29. React and BB's source renderer are provided by the SDK runtime. Zod is the only runtime package dependency.
 
-## Passed
+## Automated checks
 
-- `npm run typecheck`
-- `npm test`: 12 tests covering file and relative-path navigation, percent-encoded file URLs, hidden entries, symlinks, bounded text/binary reads, host schema validation, mutation detection, sparse 2 GiB reads, range parsing, exact response bodies, HEAD, backpressure, abort, cleanup, and If-Range.
-- `npm run test:ui`: 6 headless Chromium workflows covering navigation, history, filtering, hidden files, range selection, quick look/Escape, editable paths, error retention, columns, virtualized grids, keyboard navigation, narrow layouts and preserving the folder across BB's responsive remount.
-- The opt-in native browser workflow performs 12 consecutive video play → seek → close cycles and asserts the detached player is paused and its source removed. No page errors.
-- Real thread-panel launch starts at that thread's environment directory. Source, column, and image previews checked at 609 px panel width without visible desktop launches.
-- Connected-host directory listings checked on wubulon, chatgpt-dev, and warmap.
-- MP4 streamed from chatgpt-dev: successful playback and seek to 8 seconds, no media or page errors. Temporary test file removed.
-- Live media endpoint: initial, middle and suffix requests return exact 1024-byte slices with HTTP 206; an out-of-range request returns 416; HEAD reports the correct size; complete response matches the original bytes.
-- A changed file invalidates its lease with HTTP 409. Unknown leases return 404.
-- Plugin build includes server, app and host bundles; permanent path installation reports running.
+- TypeScript checks the app, server, host and contract boundaries.
+- Backend tests exercise filesystem navigation, hidden files, symlinks, bounded reads, binary detection, source/host/storage targeting, byte ranges, file identity checks, backpressure, cancellation, and decoder lifetime.
+- Real FFmpeg tests cover VP9/Opus decoding, seeking, JPEG frames, finite nonzero PCM, EOF, capacity, idle expiry, explicit stop and disposal.
+- Headless live BB UI tests cover paths, filters, history, selection, keyboard navigation, list/grid/column virtualization, narrow layouts, and wheel scrolling directories containing 240 folders in all three views.
+- Compatibility playback tests check moving canvas pixels, repeated play/seek/pause, stable paused frames, nonzero scheduled audio, closed audio contexts, and the absence of native video elements.
+- HTML tests load and interact with relative JavaScript assets, prove that parent DOM access is blocked, check that embedded video makes no request, and exercise the source/render toggle.
+- An optional live-thread integration test checks BB's own file-opening route. Set `BB_THREAD_ID` to an existing thread on the fixture machine.
+- Local and connected Unix host integration checks verify exact range bytes and playback/seek. The remote fixture is temporary and removed in `finally`.
+- The package check requires all three prebuilt entries, matching SDK metadata, styles, manifest, README, license and skill, and excludes local artifacts, dependencies and test output.
 
-## Why the media transport is separate
+Run commands and environment variables are documented in [README](README.md). Public screenshots contain only generated fixtures and the plugin surface.
 
-A live `Range: bytes=0-1023` request to BB's built-in `/api/v1/file-previews/.../playback-check.mp4` returned HTTP 200 and all 2,505,981 bytes. The local BB source's `routes/files.ts` and `services/hosts/daemon-file-response.ts` confirm that path obtains and decodes whole file content and does not forward the range. This is evidence against using that endpoint for video, not proof that it causes every reported BB crash.
+## Assumptions and limits
 
-Files uses a plugin HTTP route and host RPC chunks of at most 256 KiB, with backpressure and cancellation. Active playback extends the lease; file identity is pinned across requests and verified on every chunk. That byte-stream path uses the browser decoder only for audio files and explicitly selected native video. Compatibility video now uses a separate FFmpeg decoder, canvas frames and Web Audio. No claim is made that every codec, GPU, desktop WebView, or Connect network path has been tested.
+BB selects the first matching file opener when there is no extension preference; another plugin or an explicit built-in preference can win. Set the extension to Files in BB Settings when a guaranteed default is wanted. Preferences are per client. Unknown and extensionless links retain BB's existing handling.
 
-## Screenshots and machine results
+Workspace and storage paths resolve against their owning root on the actual host. Missing source information fails explicitly. An explicit host path is authoritative even if the thread belongs to another machine. This browser is read-only and does not form a security boundary restricting the user to a project directory.
 
-- [Thread panel: source](artifacts/side-panel-source.png)
-- [Thread panel: directory columns](artifacts/side-panel-columns.png)
-- [Thread panel: images](artifacts/side-panel-images.png)
-- [Dark source view](artifacts/source-wide.png)
-- [Dark video view](artifacts/video-final.png)
-- [Remote playback](artifacts/remote-video.png)
-- [Narrow image view](artifacts/narrow-images.png)
-- [Transport results](artifacts/transport-results.json)
-- [Remote playback results](artifacts/remote-media-results.json)
+HTML scripts are enabled in an opaque-origin sandbox. BB itself is isolated, but HTML can contact network services; the preview is not an offline or untrusted-code execution service. Child frames, objects and native media are disabled. Module/fetch requests may encounter CORS, directory preview URLs cannot serve assets outside the granted root, and backend-dependent apps need an ordinary server.
 
-Screenshots and generated media fixtures are local artifacts, excluded from version control. `npm run fixtures` prepares the reproducible fixtures used by the browser tests. The read-only media integration scripts live under `tests/`; the remote test temporarily uploads a fixture and removes it in `finally`.
+Video uses an independent FFmpeg subprocess and contains no HTML video element by default. This bypasses the native video surface associated with flicker and input freezes on Arch. Hidden Electron and Chromium tests cannot prove that a visible compositor bug is fixed; no BB or graphics-driver fix is claimed. Native playback is opt-in and may still trigger that issue. Compatibility playback trades fidelity and bandwidth for reliability: at most 1280×720, 24 fps, 48 kHz stereo, JPEG transport and frame dropping on slow connections. Each host needs FFmpeg/ffprobe. Network latency can reduce frame rate.
 
+Linux local and remote hosts are tested. macOS and Windows are unverified. The GitHub CI job runs backend tests and type checks on Linux; live installed-BB checks and packaging are release checks performed separately.
 
-## Arch desktop video workaround — 0.2.0
+## Fixed regressions
 
-The user reports reliable flickering and loss of interaction when native WebM video is visible in BB desktop on Arch. Both an isolated matching Electron 44.3.0 / Chromium 152 runtime and a hidden test tab inside the running desktop process could advance and seek the supplied `battle-ai-formations-demo.webm`. Those results do **not** reproduce or disprove the visible-window compositing failure. No BB or graphics-driver fix is claimed.
-
-Files now defaults to compatibility playback. The regression assertion is architectural: no HTML video element is mounted by default. UI checks exercise moving canvas pixels, repeated play/seek/pause, stable paused frames, nonzero PCM audio scheduled via Web Audio, and all audio contexts closed afterward. The real FFmpeg tests cover a VP9/Opus fixture, seeking, JPEG output, finite nonzero PCM, EOF, concurrent-session limits, cancellation, explicit stop, idle expiry and disposal. Local WebM/MP4 and remote MP4 playback/seek were exercised. Remote temporary fixtures are removed.
-
-The supplied user clip is exercised with:
-
-```sh
-FILES_VIDEO_TEST_PATH=/home/shamanic/dev/warmap/Workspaces/battle-locomotion-stress/Content/generated-media/prototypes/battle-ai-formations-demo.webm npx playwright test -g 'compatibility video'
-```
-
-The invisible matching-Electron smoke test is retained under `artifacts/video-diagnosis/safe-check.mjs`. It checks WebM and MP4 playback/seek with zero native video elements. Hidden windows do not validate the user's visible compositor symptom. The earlier native test had a stale-element navigation race; those initial timeouts were discarded, and all later tests wait for initialization and replacement.
-
-[Compatibility player screenshot](artifacts/compatibility-player.png). Preview tradeoffs: FFmpeg/ffprobe on the file host, at most 1280×720 / 24 fps, JPEG transport bandwidth, and frame dropping on slow connections. Native playback is opt-in and remains exposed to the underlying desktop bug.
-
-
-## Folder scrolling crash — 0.2.1
-
-Reproduced against the installed plugin using `npx playwright test -g 'wheel scrolling folder'`: wheel scrolling a directory containing 240 folders removed the file browser and emitted `TypeError: Cannot read properties of null (reading 'scrollTop')` from the EntryList state updater. No recent system coredump or OOM kill was found in the same investigation; the reproduced failure is a React UI exception.
-
-The handler captured the React event inside a deferred functional state update. React clears `currentTarget` after dispatch. Capturing the numeric scroll position synchronously fixes that lifetime error. The same regression test now passes wheel scrolling down/up and opening folders afterward in list, grid, and column views, with no console or page errors. Existing keyboard-only virtualization tests did not exercise this path.
+The folder-scroll failure was reproduced as `TypeError: Cannot read properties of null (reading 'scrollTop')`, a React UI exception. The handler retained an event inside a deferred updater after React cleared `currentTarget`. Capturing the numeric scroll position synchronously fixes the event lifetime. The regression checks wheel scrolling and opening folders afterward in list, grid and column views.

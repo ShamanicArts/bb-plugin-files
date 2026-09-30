@@ -93,7 +93,7 @@ export function FileGlyph({
             stroke="currentColor"
             strokeWidth="1.5"
           />
-          {kind === "code" ? (
+          {kind === "code" || kind === "html" ? (
             <path
               d="m20 23-5 5 5 5m8-10 5 5-5 5m-3-12-3 14"
               stroke="currentColor"

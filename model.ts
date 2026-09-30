@@ -1,5 +1,6 @@
 import type { Entry } from "./contract";
 export type FileKind =
+  | "html"
   | "folder"
   | "image"
   | "video"
@@ -11,6 +12,7 @@ export type FileKind =
 export function fileKind(entry: Pick<Entry, "kind" | "name">): FileKind {
   if (entry.kind === "directory") return "folder";
   const ext = entry.name.split(".").pop()?.toLowerCase() || "";
+  if (["html", "htm"].includes(ext)) return "html";
   if (
     ["png", "jpg", "jpeg", "gif", "webp", "avif", "svg", "bmp", "ico"].includes(
       ext,

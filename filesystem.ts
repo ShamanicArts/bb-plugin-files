@@ -2,7 +2,15 @@ import { opendir, stat, lstat, open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { resolve, dirname, basename, isAbsolute, join } from "node:path";
+import {
+  resolve,
+  dirname,
+  basename,
+  isAbsolute,
+  join,
+  relative,
+  sep,
+} from "node:path";
 import type { Entry, Listing } from "./contract";
 export const MAX_ENTRIES = 20000;
 export const MAX_TEXT_BYTES = 512 * 1024;
@@ -81,7 +89,22 @@ export async function listDirectory(
     selected,
   };
 }
-export async function readText(path: string) {
+export function resolveFilePath(input: { path: string; root?: string }) {
+  if (!input.root) return { path: resolvePath(input.path) };
+  const root = resolvePath(input.root);
+  if (
+    isAbsolute(input.path) ||
+    input.path.startsWith("file://") ||
+    input.path.startsWith("~")
+  )
+    throw new Error("Source-relative files must use a relative path.");
+  const path = resolvePath(input.path, root);
+  const suffix = relative(root, path);
+  if (suffix === ".." || suffix.startsWith(`..${sep}`) || isAbsolute(suffix))
+    throw new Error("File path escapes its source directory.");
+  return { path };
+}
+export async function readText(path: string, limit = MAX_TEXT_BYTES) {
   const file = await open(
     resolvePath(path),
     constants.O_RDONLY | constants.O_NONBLOCK,
@@ -89,7 +112,7 @@ export async function readText(path: string) {
   try {
     const info = await file.stat();
     if (!info.isFile()) throw new Error("Only regular files can be previewed.");
-    const buffer = Buffer.alloc(Math.min(info.size, MAX_TEXT_BYTES));
+    const buffer = Buffer.alloc(Math.min(info.size, limit));
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     const bytes = buffer.subarray(0, bytesRead);
     const binary = bytes.includes(0);

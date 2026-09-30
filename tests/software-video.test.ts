@@ -134,3 +134,22 @@ test("invalid positions and cancellation never start a retained decoder", () =>
       d.dispose();
     }
   }));
+
+test("missing FFprobe gives an actionable error without retaining a decoder", () =>
+  fixture(async (path) => {
+    const script = `import assert from 'node:assert/strict';
+      import {inspectVideo,createVideoDecoder} from './software-video.ts';
+      const path = ${JSON.stringify(path)};
+      await assert.rejects(inspectVideo(path), /requires ffprobe/);
+      const decoder=createVideoDecoder();
+      try {await assert.rejects(decoder.start(path,0), /requires ffprobe/); assert.equal(decoder.size,0);}
+      finally {decoder.dispose();}`;
+    await exec(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      {
+        env: { ...process.env, PATH: join(tmpdir(), "files-no-video-tools") },
+        timeout: 5000,
+      },
+    );
+  }));

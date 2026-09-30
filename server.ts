@@ -1,4 +1,5 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { resolveFileTarget } from "./file-target";
 import { registerMedia } from "./media";
 import { hostContract, rpcContract } from "./contract";
 export { rpcContract } from "./contract";
@@ -9,6 +10,27 @@ export default function plugin(bb: BbPluginApi) {
   bb.rpc.register(
     rpcContract,
     {
+      resolveFile: ({ path, source }) =>
+        resolveFileTarget(
+          {
+            primaryHost: async () =>
+              (await bb.sdk.system.config()).primaryHostId || null,
+            thread: (id) => bb.sdk.threads.get({ threadId: id }),
+            environment: async (id) => {
+              const env = await bb.sdk.environments.get({ environmentId: id });
+              if (!env.path)
+                throw new Error("Environment has no working directory.");
+              return { hostId: env.hostId, path: env.path };
+            },
+            project: (id) => bb.sdk.projects.get({ projectId: id }),
+            storage: (id) => bb.sdk.threads.storageLocation({ threadId: id }),
+            resolve: (hostId, path, root) =>
+              host.call("resolve", { path, root }, { hostId }),
+          },
+          path,
+          source,
+        ),
+      html: ({ hostId, ...input }) => host.call("html", input, { hostId }),
       videoInfo: ({ hostId, ...input }) =>
         host.call("videoInfo", input, { hostId, timeoutMs: 20000 }),
       videoPoster: ({ hostId, ...input }) =>

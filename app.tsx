@@ -17,6 +17,7 @@ import {
   useBbNavigate,
   useComposer,
   experimental_SourceCode as SourceCode,
+  type PluginFileOpenerProps,
 } from "@get-bb/plugin-sdk/app";
 import type { rpcContract, Entry, Listing } from "./contract";
 import {
@@ -29,6 +30,8 @@ import {
   savePreference,
 } from "./model";
 import { Glyph, FileGlyph } from "./icons";
+import { htmlPreviewDocument } from "./html-preview";
+import { SUPPORTED_EXTENSIONS } from "./supported-files";
 import { SafeVideo } from "./safe-video";
 import "./app.css";
 type View = "list" | "grid" | "columns";
@@ -159,7 +162,9 @@ function Preview({
   hasNext,
   onCopy,
   onUse,
+  lineRange,
 }: {
+  lineRange?: { startLineNumber: number; endLineNumber: number } | null;
   entry: Entry;
   hostId: string;
   base: string | null;
@@ -182,6 +187,17 @@ function Preview({
     size: number;
   } | null>(null);
   const [error, setError] = useState("");
+  const highlightedLines = useMemo(
+    () =>
+      lineRange
+        ? { start: lineRange.startLineNumber, end: lineRange.endLineNumber }
+        : null,
+    [lineRange],
+  );
+  const [renderHtml, setRenderHtml] = useState(!lineRange);
+  useEffect(() => {
+    if (lineRange) setRenderHtml(false);
+  }, [lineRange]);
   const [wrap, setWrap] = useState(false);
   const [zoom, setZoom] = useState(false);
   const [nativeVideo, setNativeVideo] = useState(false);
@@ -198,18 +214,20 @@ function Preview({
     setZoom(false);
     setMediaError(false);
     if (!isMedia && entry.kind === "file")
-      rpc.call("text", { hostId, path: entry.path }).then(
-        (v) => {
-          if (alive) setText(v);
-        },
-        (e) => {
-          if (alive) setError(String(e.message || e));
-        },
-      );
+      rpc
+        .call(kind === "html" ? "html" : "text", { hostId, path: entry.path })
+        .then(
+          (v) => {
+            if (alive) setText(v);
+          },
+          (e) => {
+            if (alive) setError(String(e.message || e));
+          },
+        );
     return () => {
       alive = false;
     };
-  }, [entry.path, entry.modified, hostId, isMedia, rpc]);
+  }, [entry.path, entry.modified, hostId, isMedia, kind, rpc]);
   useEffect(() => {
     let alive = true;
     setStreamUrl(null);
@@ -353,16 +371,41 @@ function Preview({
             <p>No text preview for this file.</p>
             <span>{sizeLabel(text.size)}</span>
           </div>
+        ) : kind === "html" && renderHtml ? (
+          text.truncated ? (
+            <div className="ff-preview-empty" role="alert">
+              <p>
+                HTML preview is limited to 2 MB. Switch to source to inspect the
+                beginning.
+              </p>
+            </div>
+          ) : base ? (
+            <iframe
+              className="ff-html-preview"
+              title={`HTML preview of ${entry.name}`}
+              sandbox="allow-scripts"
+              referrerPolicy="no-referrer"
+              srcDoc={htmlPreviewDocument(
+                text.content,
+                new URL(`${base.replace(/\/$/, "")}/`, window.location.href)
+                  .href,
+              )}
+            />
+          ) : (
+            <div className="ff-loading">Preparing HTML assets…</div>
+          )
         ) : (
           <div className="ff-source">
             <SourceCode
               content={text.content}
               path={entry.path}
+              highlightedLines={highlightedLines}
               overflow={wrap ? "wrap" : "scroll"}
             />
             {text.truncated && (
               <p className="ff-truncated">
-                Showing the first 512 KB. Open in BB for more.
+                Showing the bounded beginning of this file. Download it to view
+                the rest.
               </p>
             )}
           </div>
@@ -390,6 +433,14 @@ function Preview({
                 active={zoom}
               />
             )}{" "}
+            {kind === "html" && (
+              <button
+                className="ff-html-toggle"
+                onClick={() => setRenderHtml((v) => !v)}
+              >
+                {renderHtml ? "View source" : "Render HTML"}
+              </button>
+            )}
             {!isMedia && text && !text.binary && (
               <Tool
                 icon="wrap"
@@ -578,10 +629,14 @@ function EntryList({
 function FilesBrowser({
   threadId = null,
   projectId = null,
+  initialTarget,
+  lineRange,
   onUse,
 }: {
   threadId?: string | null;
   projectId?: string | null;
+  initialTarget?: { hostId: string; path: string };
+  lineRange?: { startLineNumber: number; endLineNumber: number } | null;
   onUse: (paths: string[]) => void;
 }) {
   const scopeKey = `bb-files:location:${threadId || projectId || "standalone"}`;
@@ -714,6 +769,7 @@ function FilesBrowser({
           setHistory((h) => ({ ...h, index: historyIndex }));
         if (listRef.current && mode !== "refresh")
           listRef.current.scrollTop = 0;
+        return true;
       } catch (e) {
         if (token === request.current)
           setError(e instanceof Error ? e.message : String(e));
@@ -732,8 +788,13 @@ function FilesBrowser({
         if (alive) {
           setContext(c);
           if (request.current === initialRequest) {
-            const saved = sessionLocation(scopeKey);
-            void navigate(saved?.path || c.path, saved?.hostId || c.hostId);
+            const saved = initialTarget || sessionLocation(scopeKey);
+            void navigate(
+              saved?.path || c.path,
+              saved?.hostId || c.hostId,
+            ).then((ok) => {
+              if (alive && ok && initialTarget) setExpanded(true);
+            });
           }
         }
       },
@@ -748,7 +809,7 @@ function FilesBrowser({
       alive = false;
       ++request.current;
     };
-  }, [threadId, projectId, rpc, navigate, scopeKey]);
+  }, [threadId, projectId, rpc, navigate, scopeKey, initialTarget]);
   useEffect(() => {
     if (!location) return;
     let alive = true;
@@ -1353,6 +1414,7 @@ function FilesBrowser({
           <Preview
             key={`${location.hostId}:${current.path}`}
             entry={current}
+            lineRange={current.path === initialTarget?.path ? lineRange : null}
             hostId={location.hostId}
             base={base}
             expanded={expanded}
@@ -1450,7 +1512,74 @@ function PageFiles() {
     />
   );
 }
+function OpenedFile({
+  path,
+  source,
+  experimental_lineRange,
+  Original,
+}: PluginFileOpenerProps) {
+  const rpc = useRpc<typeof rpcContract>();
+  const navigate = useBbNavigate();
+  const [target, setTarget] = useState<{ hostId: string; path: string } | null>(
+    null,
+  );
+  const [error, setError] = useState("");
+  const [original, setOriginal] = useState(false);
+  const sourceKey = JSON.stringify(source);
+  useEffect(() => {
+    let alive = true;
+    setTarget(null);
+    setError("");
+    setOriginal(false);
+    rpc.call("resolveFile", { path, source }).then(
+      (value) => {
+        if (alive) setTarget(value);
+      },
+      (e) => {
+        if (alive) setError(String(e.message || e));
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [path, sourceKey, rpc]);
+  if (original) return <Original />;
+  if (error)
+    return (
+      <div className="ff-opener-status" role="alert">
+        <p>{error}</p>
+        <button onClick={() => setOriginal(true)}>Open with BB preview</button>
+      </div>
+    );
+  if (!target)
+    return (
+      <div className="ff-opener-status" role="status">
+        Resolving file…
+      </div>
+    );
+  return (
+    <FilesBrowser
+      key={`${target.hostId}:${target.path}`}
+      threadId={source.threadId}
+      projectId={source.projectId}
+      initialTarget={target}
+      lineRange={experimental_lineRange}
+      onUse={(paths) =>
+        navigate.toCompose({
+          initialPrompt: paths.map((p) => JSON.stringify(p)).join("\n"),
+          focusPrompt: true,
+        })
+      }
+    />
+  );
+}
 export default definePluginApp((app) => {
+  app.slots.fileOpener({
+    id: "viewer",
+    title: "Files",
+    extensions: [...SUPPORTED_EXTENSIONS],
+    component: OpenedFile,
+  });
   app.slots.navPanel({
     id: "files",
     title: "Files",

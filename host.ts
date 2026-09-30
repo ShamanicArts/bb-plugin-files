@@ -1,6 +1,12 @@
 import { experimental_defineHostEntry } from "@get-bb/plugin-sdk";
 import { hostContract } from "./contract";
-import { listDirectory, readText, mediaInfo, readChunk } from "./filesystem";
+import {
+  listDirectory,
+  readText,
+  mediaInfo,
+  readChunk,
+  resolveFilePath,
+} from "./filesystem";
 import {
   createVideoDecoder,
   inspectVideo,
@@ -11,6 +17,8 @@ export default experimental_defineHostEntry({
   contract: hostContract,
   dispose: () => video.dispose(),
   handlers: {
+    resolve: (input) => resolveFilePath(input),
+    html: ({ path }) => readText(path, 2 * 1024 * 1024),
     videoInfo: ({ path }, ctx) => inspectVideo(path, ctx.signal),
     videoPoster: ({ path, time }, ctx) => videoPoster(path, time, ctx.signal),
     videoStart: ({ path, time }, ctx) =>
