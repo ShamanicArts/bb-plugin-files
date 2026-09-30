@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 — 2026-09-30
+
+- Removed the HTML preview file-size cap. Complete HTML now streams over HTTP from local or connected machines, including documents larger than the host RPC message limit.
+- Relative assets, interactive scripts, source toggling, sandbox isolation and blocked native media remain supported.
+- Added full-document, tail-content, stream cancellation and large interactive HTML regressions.
+- The `html` RPC now returns a temporary streaming URL instead of document text.
+
 ## 0.3.0 — 2026-09-30
 
 First public release.

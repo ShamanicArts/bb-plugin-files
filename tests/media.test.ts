@@ -120,3 +120,92 @@ test("stale If-Range falls back to complete representation", async () => {
   assert.equal(response.status, 200);
   assert.equal((await response.arrayBuffer()).byteLength, 10);
 });
+
+test("HTML streams the whole file with a prefix and bounded reads, without a file-size ceiling", async () => {
+  const size = 12 * 1024 * 1024 + 17;
+  const prefix = new TextEncoder().encode(
+    '<!doctype html><base href="/assets/">',
+  );
+  let reads = 0,
+    ended = 0;
+  const response = streamResponse({
+    request: new Request("http://localhost", {
+      headers: { range: "bytes=0-2" },
+    }),
+    size,
+    modified: 0,
+    identity: "large-html",
+    mime: "text/html; charset=utf-8",
+    prefix,
+    csp: "sandbox allow-scripts; media-src 'none'",
+    read: async (offset, length) => {
+      reads++;
+      assert(length <= CHUNK_SIZE);
+      return new Uint8Array(length).fill(offset + length === size ? 9 : 1);
+    },
+    onEnd: () => ended++,
+  });
+  assert.equal(reads, 0);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("accept-ranges"), "none");
+  assert.equal(
+    response.headers.get("content-length"),
+    String(size + prefix.byteLength),
+  );
+  assert.equal(
+    response.headers.get("content-security-policy"),
+    "sandbox allow-scripts; media-src 'none'",
+  );
+  const reader = response.body!.getReader();
+  assert.deepEqual((await reader.read()).value, prefix);
+  assert.equal(reads, 0);
+  let received = 0,
+    last;
+  for (;;) {
+    const next = await reader.read();
+    if (next.done) break;
+    received += next.value.length;
+    last = next.value;
+  }
+  assert.equal(received, size);
+  assert.equal(last!.at(-1), 9);
+  assert.equal(ended, 1);
+});
+
+test("empty and HEAD HTML preserve the injected document's length and cancellation frees the stream", async () => {
+  const prefix = new TextEncoder().encode("<!doctype html>");
+  const args = {
+    size: 0,
+    modified: 0,
+    identity: "empty",
+    mime: "text/html",
+    prefix,
+    read: async () => {
+      throw new Error("Unexpected host read");
+    },
+  };
+  assert.equal(
+    await streamResponse({
+      ...args,
+      request: new Request("http://localhost"),
+    }).text(),
+    "<!doctype html>",
+  );
+  const head = streamResponse({
+    ...args,
+    request: new Request("http://localhost", { method: "HEAD" }),
+  });
+  assert.equal(head.headers.get("content-length"), String(prefix.byteLength));
+  assert.equal(await head.text(), "");
+  let ended = 0;
+  const r = streamResponse({
+    ...args,
+    size: 12 * 1024 * 1024,
+    request: new Request("http://localhost"),
+    onEnd: () => ended++,
+  });
+  const reader = r.body!.getReader();
+  await reader.read();
+  await reader.cancel();
+  assert.equal(ended, 1);
+});

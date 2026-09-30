@@ -30,7 +30,19 @@ export default function plugin(bb: BbPluginApi) {
           path,
           source,
         ),
-      html: ({ hostId, ...input }) => host.call("html", input, { hostId }),
+      html: async ({ hostId, path }) => {
+        const resolved = await host.call("resolve", { path }, { hostId });
+        const preview = await bb.sdk.files.createPreview({
+          hostId,
+          rootPath: resolved.parent,
+          ttlMs: 3600000,
+        });
+        return media.lease(
+          hostId,
+          resolved.path,
+          preview.baseUrl.replace(/\/$/, "") + "/",
+        );
+      },
       videoInfo: ({ hostId, ...input }) =>
         host.call("videoInfo", input, { hostId, timeoutMs: 20000 }),
       videoPoster: ({ hostId, ...input }) =>

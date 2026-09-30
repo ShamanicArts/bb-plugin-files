@@ -1,6 +1,6 @@
 # Release verification
 
-Files 0.3.0 is built against BB 0.44.0 and Plugin SDK 0.5.29. React and BB's source renderer are provided by the SDK runtime. Zod is the only runtime package dependency.
+Files 0.3.1 is built against BB 0.44.0 and Plugin SDK 0.5.29. React and BB's source renderer are provided by the SDK runtime. Zod is the only runtime package dependency.
 
 ## Automated checks
 
@@ -9,6 +9,7 @@ Files 0.3.0 is built against BB 0.44.0 and Plugin SDK 0.5.29. React and BB's sou
 - Real FFmpeg tests cover VP9/Opus decoding, seeking, JPEG frames, finite nonzero PCM, EOF, capacity, idle expiry, explicit stop and disposal.
 - Headless live BB UI tests cover paths, filters, history, selection, keyboard navigation, list/grid/column virtualization, narrow layouts, and wheel scrolling directories containing 240 folders in all three views.
 - Compatibility playback tests check moving canvas pixels, repeated play/seek/pause, stable paused frames, nonzero scheduled audio, closed audio contexts, and the absence of native video elements.
+- A 12 MiB HTML regression verifies content and interactive scripts at the end of a document larger than the host RPC message limit, with full-document streaming and no file-size ceiling.
 - HTML tests load and interact with relative JavaScript assets, prove that parent DOM access is blocked, check that embedded video makes no request, and exercise the source/render toggle.
 - An optional live-thread integration test checks BB's own file-opening route. Set `BB_THREAD_ID` to an existing thread on the fixture machine.
 - Local and connected Unix host integration checks verify exact range bytes and playback/seek. The remote fixture is temporary and removed in `finally`.

@@ -72,18 +72,11 @@ export const fileSourceSchema = z.object({
   projectId: z.string().nullable(),
   experimental_hostId: z.string().optional(),
 });
-const textResult = z.object({
-  content: z.string(),
-  truncated: z.boolean(),
-  binary: z.boolean(),
-  size: z.number(),
-});
 export const hostContract = defineRpcContract({
   resolve: {
     input: z.object({ path: pathSchema, root: pathSchema.optional() }),
-    output: z.object({ path: pathSchema }),
+    output: z.object({ path: pathSchema, parent: pathSchema }),
   },
-  html: { input: z.object({ path: pathSchema }), output: textResult },
   ...videoMethods,
   list: {
     input: z.object({ path: pathSchema, base: z.string().optional() }),
@@ -115,8 +108,8 @@ export const rpcContract = defineRpcContract({
     output: z.object({ path: pathSchema, hostId: z.string() }),
   },
   html: {
-    input: hostContract.html.input.extend({ hostId: z.string().min(1) }),
-    output: textResult,
+    input: z.object({ hostId: z.string().min(1), path: pathSchema }),
+    output: z.object({ url: z.string(), expiresAtMs: z.number() }),
   },
   videoInfo: {
     ...videoMethods.videoInfo,

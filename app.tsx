@@ -30,7 +30,6 @@ import {
   savePreference,
 } from "./model";
 import { Glyph, FileGlyph } from "./icons";
-import { htmlPreviewDocument } from "./html-preview";
 import { SUPPORTED_EXTENSIONS } from "./supported-files";
 import { SafeVideo } from "./safe-video";
 import "./app.css";
@@ -204,6 +203,7 @@ function Preview({
   const [mediaError, setMediaError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [htmlUrl, setHtmlUrl] = useState<string | null>(null);
 
   const kind = fileKind(entry);
   const isMedia = ["image", "video", "audio"].includes(kind);
@@ -213,21 +213,35 @@ function Preview({
     setError("");
     setZoom(false);
     setMediaError(false);
-    if (!isMedia && entry.kind === "file")
-      rpc
-        .call(kind === "html" ? "html" : "text", { hostId, path: entry.path })
-        .then(
-          (v) => {
-            if (alive) setText(v);
-          },
-          (e) => {
-            if (alive) setError(String(e.message || e));
-          },
-        );
+    if (!isMedia && entry.kind === "file" && (kind !== "html" || !renderHtml))
+      rpc.call("text", { hostId, path: entry.path }).then(
+        (v) => {
+          if (alive) setText(v);
+        },
+        (e) => {
+          if (alive) setError(String(e.message || e));
+        },
+      );
     return () => {
       alive = false;
     };
-  }, [entry.path, entry.modified, hostId, isMedia, kind, rpc]);
+  }, [entry.path, entry.modified, hostId, isMedia, kind, renderHtml, rpc]);
+  useEffect(() => {
+    let alive = true;
+    setHtmlUrl(null);
+    if (kind === "html" && renderHtml)
+      rpc.call("html", { hostId, path: entry.path }).then(
+        (v) => {
+          if (alive) setHtmlUrl(v.url);
+        },
+        (e) => {
+          if (alive) setError(String(e.message || e));
+        },
+      );
+    return () => {
+      alive = false;
+    };
+  }, [entry.path, entry.modified, hostId, kind, renderHtml, rpc]);
   useEffect(() => {
     let alive = true;
     setStreamUrl(null);
@@ -363,6 +377,18 @@ function Preview({
           <div className="ff-empty" role="alert">
             {error}
           </div>
+        ) : kind === "html" && renderHtml ? (
+          htmlUrl ? (
+            <iframe
+              className="ff-html-preview"
+              title={`HTML preview of ${entry.name}`}
+              sandbox="allow-scripts"
+              referrerPolicy="no-referrer"
+              src={htmlUrl}
+            />
+          ) : (
+            <div className="ff-loading">Loading HTML…</div>
+          )
         ) : !text ? (
           <div className="ff-loading">Loading preview…</div>
         ) : text.binary ? (
@@ -371,29 +397,6 @@ function Preview({
             <p>No text preview for this file.</p>
             <span>{sizeLabel(text.size)}</span>
           </div>
-        ) : kind === "html" && renderHtml ? (
-          text.truncated ? (
-            <div className="ff-preview-empty" role="alert">
-              <p>
-                HTML preview is limited to 2 MB. Switch to source to inspect the
-                beginning.
-              </p>
-            </div>
-          ) : base ? (
-            <iframe
-              className="ff-html-preview"
-              title={`HTML preview of ${entry.name}`}
-              sandbox="allow-scripts"
-              referrerPolicy="no-referrer"
-              srcDoc={htmlPreviewDocument(
-                text.content,
-                new URL(`${base.replace(/\/$/, "")}/`, window.location.href)
-                  .href,
-              )}
-            />
-          ) : (
-            <div className="ff-loading">Preparing HTML assets…</div>
-          )
         ) : (
           <div className="ff-source">
             <SourceCode

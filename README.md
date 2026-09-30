@@ -14,13 +14,13 @@ A compact, path-first file browser and picker. Open **Files** from the sidebar, 
 Requires **BB 0.44.0 or later**. In BB's plugin installer, use:
 
 ```text
-git:https://github.com/ShamanicArts/bb-plugin-files.git@^0.3.0
+git:https://github.com/ShamanicArts/bb-plugin-files.git@^0.3.1
 ```
 
 Or install with the CLI:
 
 ```sh
-bb plugin install 'git:https://github.com/ShamanicArts/bb-plugin-files.git@^0.3.0' --yes
+bb plugin install 'git:https://github.com/ShamanicArts/bb-plugin-files.git@^0.3.1' --yes
 ```
 
 Install `ffmpeg` and `ffprobe` on each machine whose videos you want to preview. Other file browsing and previews work without them. Linux is tested; macOS and Windows are not yet verified.
@@ -31,7 +31,7 @@ Install `ffmpeg` and `ffprobe` on each machine whose videos you want to preview.
 
 Files registers BB's supported file-opener hook for HTML, source/text, images, video and audio. With no extension preference, BB chooses the first matching registered opener. **Settings → File openers** lets you explicitly choose **Files** for each extension, including `.html`, `.htm`, `.webm` and `.mp4`. Existing choices are respected; installing the plugin does not overwrite your preferences. These choices belong to each BB client, so set them separately on desktop and remote browser clients.
 
-HTML opens as an interactive document with a **View source** toggle. Relative assets resolve from the file's directory on its machine. Scripts run in an opaque-origin sandbox and cannot access BB's DOM or cookies. Native embedded media, child frames, objects and popups are disabled. Module scripts/fetches that require same-origin access, absolute filesystem assets, parent-directory assets, and apps requiring a backend may not work; serve those apps normally. Files refuses to render truncated HTML above 2 MiB. Line-specific HTML links open source instead.
+HTML opens as an interactive document with a **View source** toggle. Relative assets resolve from the file's directory on its machine. Scripts run in an opaque-origin sandbox and cannot access BB's DOM or cookies. Native embedded media, child frames, objects and popups are disabled. Module scripts/fetches that require same-origin access, absolute filesystem assets, parent-directory assets, and apps requiring a backend may not work; serve those apps normally. HTML documents stream in full without a file-size cap. Line-specific HTML links open source instead.
 
 Files claims only known previewable extensions. Extensionless files can be browsed as text inside Files, while unsupported file links such as PDF and archives retain BB's existing handling.
 
@@ -68,7 +68,7 @@ Playback retains a host worker only while a session exists. Pause, close, switch
 
 Native audio, opt-in native video and downloads use a temporary media lease with `HEAD`, HTTP 206, open/suffix byte ranges, 416 and `If-Range`. Each host read is at most 256 KiB and checked against the file identity. Streams have backpressure, cancellation, bounded leases and an eight-response concurrency cap. BB's built-in `/file-previews` loader is not used for these streams: the tested core route ignored Range and buffered the whole file.
 
-Images use BB's confined preview URLs. Grid thumbnails load lazily and skip originals larger than 10 MiB. Text previews are read-only and capped at 512 KiB; HTML has a 2 MiB limit. Listings cap at 20,000 entries and disclose truncation. No files are edited, renamed, or deleted by the plugin. Column mode shows the parent directory and current directory, with preview beside or below them depending on panel width.
+Images use BB's confined preview URLs. Grid thumbnails load lazily and skip originals larger than 10 MiB. Source previews are read-only and show a bounded beginning; rendered HTML streams the complete document. Listings cap at 20,000 entries and disclose truncation. No files are edited, renamed, or deleted by the plugin. Column mode shows the parent directory and current directory, with preview beside or below them depending on panel width.
 
 ## Development
 
@@ -87,13 +87,13 @@ The frontend uses React/TypeScript and the installed BB theme and source rendere
 
 ## RPC
 
-Inspect contracts with `bb plugin rpc inspect files`. Methods: `resolveFile`, `context`, `list`, `text`, `html`, `preview` (images), `media` (bounded file stream), and `videoInfo`, `videoPoster`, `videoStart`, `videoPoll`, `videoStop` (compatibility playback). For example, save `{"hostId":"<machine-id>","path":"~"}` to an input file and run:
+Inspect contracts with `bb plugin rpc inspect files`. Methods: `resolveFile`, `context`, `list`, `text`, `html` (full document stream), `preview` (images), `media` (bounded file stream), and `videoInfo`, `videoPoster`, `videoStart`, `videoPoll`, `videoStop` (compatibility playback). For example, save `{"hostId":"<machine-id>","path":"~"}` to an input file and run:
 
 ```sh
 bb plugin rpc call files list --input-file input.json --json
 ```
 
-`context` takes `{threadId, projectId}` (both nullable). `list` takes `{hostId,path,base?}`. `text`, `preview` and `media` take `{hostId,path}`. Media URLs are temporary and remain under BB's normal plugin HTTP authentication. The plugin owns no external service, server port, or credentials.
+`context` takes `{threadId, projectId}` (both nullable). `list` takes `{hostId,path,base?}`. `text`, `html`, `preview` and `media` take `{hostId,path}`. Media URLs are temporary and remain under BB's normal plugin HTTP authentication. The plugin owns no external service, server port, or credentials.
 
 Compatibility RPC: `videoInfo` takes `{hostId,path}`; `videoPoster` and `videoStart` add a nonnegative `time` in seconds. Start returns an opaque session `id`. `videoPoll` and `videoStop` take `{hostId,id}`. Poll returns a latest JPEG, timestamp, interleaved float32 little-endian stereo PCM, audio timestamp and EOF flag. Poll at roughly 20 Hz while playing, stop on close, and expect idle expiry. These RPCs use BB's existing host transport and authentication; no extra port is exposed.
 
@@ -118,3 +118,5 @@ npm run check:package
 Set `BB_SERVER_URL` for live tests, and `BB_THREAD_ID` to include BB's file-opener integration test. `CHROMIUM_PATH` selects the browser. `FILES_LOCAL_HOST_ID` selects the local fixture machine for `node tests/transport.mjs`; `FILES_REMOTE_HOST_ID` selects an explicitly configured connected Unix host for `node tests/remote-media.mjs`. The remote test writes its own temporary MP4 and removes it afterward. No test sends a chat message.
 
 The GitHub release includes a prebuilt package and SHA-256 checksum. Git installs build source through BB. No npm publication is required. The runtime needs no external credentials or additional server port. Licensed under MIT.
+
+`html` returns `{url, expiresAtMs}` for a full streaming HTML document, with its relative-asset base and sandbox headers. It no longer reads HTML content into an RPC response.

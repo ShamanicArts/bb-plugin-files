@@ -5,10 +5,7 @@ import {
   type TargetLookup,
   type FileSource,
 } from "../file-target";
-import { resolveFilePath, readText } from "../filesystem";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { resolveFilePath } from "../filesystem";
 const source = (
   kind: FileSource["kind"],
   more: Partial<FileSource> = {},
@@ -139,17 +136,5 @@ test("missing or mismatched sources fail instead of opening another machine's fi
         source("workspace", { environmentId: "env" }),
       ),
     );
-  }
-});
-test("HTML reads stay bounded without truncating ordinary larger HTML reports", async () => {
-  const root = await mkdtemp(join(tmpdir(), "files-html-"));
-  try {
-    const path = join(root, "large.html");
-    await writeFile(path, "x".repeat(2 * 1024 * 1024 + 1));
-    const result = await readText(path, 2 * 1024 * 1024);
-    assert.equal(result.content.length, 2 * 1024 * 1024);
-    assert(result.truncated);
-  } finally {
-    await rm(root, { recursive: true, force: true });
   }
 });

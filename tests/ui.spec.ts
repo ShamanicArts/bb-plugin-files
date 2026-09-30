@@ -393,6 +393,45 @@ test("HTML renders interactive local assets in a sandbox and can switch to sourc
   ).toBeVisible();
 });
 
+test("HTML larger than the RPC message limit renders its complete tail and interactive assets", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  const root = join(fixture, "Large HTML");
+  await mkdir(root, { recursive: true });
+  await writeFile(
+    join(root, "app.js"),
+    `document.querySelector('button').onclick=()=>document.querySelector('output').textContent='Full report works';try{parent.document.body;document.body.dataset.isolation='unsafe'}catch{document.body.dataset.isolation='blocked'}`,
+  );
+  await writeFile(
+    join(root, "report.html"),
+    "<!doctype html><title>Large report</title><!--" +
+      "x".repeat(12 * 1024 * 1024) +
+      '--><h1>Complete large report</h1><button>Run full report</button><output>Ready</output><script src="app.js"></script><video src="blocked.webm" autoplay muted></video>',
+  );
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("blocked.webm")) requests.push(request.url());
+  });
+  await go(page, join(root, "report.html"));
+  const frame = page.frameLocator(
+    'iframe[title="HTML preview of report.html"]',
+  );
+  await expect(
+    frame.getByRole("heading", { name: "Complete large report" }),
+  ).toBeVisible({ timeout: 30000 });
+  await expect(frame.locator("body")).toHaveAttribute(
+    "data-isolation",
+    "blocked",
+  );
+  await frame.getByRole("button", { name: "Run full report" }).click();
+  await expect(frame.locator("output")).toHaveText("Full report works");
+  expect(requests).toEqual([]);
+  await page
+    .locator(".ff-browser")
+    .screenshot({ path: "artifacts/large-html-full.png" });
+});
+
 test("BB file tabs use Files by default for HTML, source and compatibility video", async ({
   page,
 }) => {
@@ -441,6 +480,11 @@ test("BB file tabs use Files by default for HTML, source and compatibility video
         builtin,
       );
       await page.goto(`/threads/${threadId}`);
+      await expect(
+        page
+          .getByRole("navigation", { name: "Sidebar navigation" })
+          .getByRole("button", { name: "Files", exact: true }),
+      ).toBeVisible();
       const show = page.getByRole("button", {
         name: "Show right panel (Ctrl + J)",
         exact: true,

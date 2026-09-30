@@ -12,7 +12,7 @@ Use `bb plugin rpc inspect files` for the current input/output schemas. `bb plug
 Methods:
 
 - `resolveFile`: `{path, source}` resolves a BB file-opener target from its host, workspace or thread-storage source. Inspect the exact source schema before calling.
-- `html`: `{hostId, path}` reads HTML up to 2 MiB. Interactive previews use a sandbox; media embeds are disabled.
+- `html`: `{hostId, path}` returns `{url,expiresAtMs}` for a complete streaming HTML document without a file-size cap. Interactive previews use a sandbox; media embeds are disabled.
 - `context`: `{threadId: string|null, projectId: string|null}` resolves host, working directory, project shortcut and available machines.
 - `list`: `{hostId, path, base?}` lists one directory with metadata; a file path lists its parent and selects that file. Accepts `~`, relative and absolute paths.
 - `text`: `{hostId, path}` returns up to 512 KiB and flags binary/truncated data.

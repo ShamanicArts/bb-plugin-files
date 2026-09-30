@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { hostContract } from "./contract";
+import { htmlPreviewDocument } from "./html-preview";
 export const CHUNK_SIZE = 256 * 1024;
 export function parseByteRange(
   value: string | null,
@@ -44,6 +45,8 @@ export function streamResponse(args: {
   modified: number;
   identity: string;
   mime: string;
+  prefix?: Uint8Array;
+  csp?: string;
   read: (
     offset: number,
     length: number,
@@ -55,18 +58,20 @@ export function streamResponse(args: {
   const { request, size, modified, identity, mime } = args;
   const etag = `"${Buffer.from(identity).toString("base64url")}"`;
   const ifRange = request.headers.get("if-range");
-  const range = parseByteRange(
-    ifRange && ifRange !== etag ? null : request.headers.get("range"),
-    size,
-  );
+  const range = args.prefix
+    ? null
+    : parseByteRange(
+        ifRange && ifRange !== etag ? null : request.headers.get("range"),
+        size,
+      );
   const headers = new Headers({
     "content-type": mime,
-    "accept-ranges": "bytes",
+    "accept-ranges": args.prefix ? "none" : "bytes",
     "cache-control": "private, no-store",
     "x-content-type-options": "nosniff",
     etag: etag,
     "last-modified": new Date(modified).toUTCString(),
-    "content-security-policy": "default-src 'none'; sandbox",
+    "content-security-policy": args.csp || "default-src 'none'; sandbox",
   });
   if (range === "invalid") {
     headers.set("content-range", `bytes */${size}`);
@@ -74,10 +79,13 @@ export function streamResponse(args: {
   }
   const start = range?.start ?? 0,
     end = range?.end ?? size - 1;
-  headers.set("content-length", String(Math.max(0, end - start + 1)));
+  headers.set(
+    "content-length",
+    String(Math.max(0, end - start + 1) + (args.prefix?.byteLength || 0)),
+  );
   if (range) headers.set("content-range", `bytes ${start}-${end}/${size}`);
   const status = range ? 206 : 200;
-  if (request.method === "HEAD" || size === 0)
+  if (request.method === "HEAD" || (size === 0 && !args.prefix))
     return new Response(null, { status, headers });
   const abort = new AbortController();
   let ended = false;
@@ -93,6 +101,7 @@ export function streamResponse(args: {
   args.onStart?.(abort);
   if (request.signal.aborted) finish();
   let offset = start;
+  let prefix = args.prefix;
   const body = new ReadableStream<Uint8Array>(
     {
       async pull(controller) {
@@ -102,6 +111,15 @@ export function streamResponse(args: {
           return;
         }
         try {
+          if (prefix) {
+            controller.enqueue(prefix);
+            prefix = undefined;
+            if (size === 0) {
+              controller.close();
+              finish();
+            }
+            return;
+          }
           const length = Math.min(CHUNK_SIZE, end - offset + 1);
           const bytes = await args.read(offset, length, abort.signal);
           if (bytes.byteLength !== length)
@@ -127,12 +145,18 @@ export function registerMedia(bb: BbPluginApi) {
   const host = bb.hosts.experimental_client({ contract: hostContract });
   const leases = new Map<
     string,
-    { hostId: string; path: string; expiresAtMs: number; identity: string }
+    {
+      hostId: string;
+      path: string;
+      expiresAtMs: number;
+      identity: string;
+      htmlBase?: string;
+    }
   >();
   const active = new Set<AbortController>();
-  async function lease(hostId: string, path: string) {
+  async function lease(hostId: string, path: string, htmlBase?: string) {
     const ext = path.split(".").pop()?.toLowerCase() || "";
-    if (!mediaTypes[ext])
+    if (htmlBase ? !["html", "htm"].includes(ext) : !mediaTypes[ext])
       throw new Error("This file type is not supported by the media player.");
     const info = await host.call("info", { path }, { hostId });
     const now = Date.now();
@@ -141,7 +165,13 @@ export function registerMedia(bb: BbPluginApi) {
     if (leases.size >= 256) leases.delete(leases.keys().next().value!);
     const id = randomUUID();
     const expiresAtMs = now + 3600000;
-    leases.set(id, { hostId, path, expiresAtMs, identity: info.identity });
+    leases.set(id, {
+      hostId,
+      path,
+      expiresAtMs,
+      identity: info.identity,
+      htmlBase,
+    });
     return {
       url: `/api/v1/plugins/${bb.pluginId}/http/media?id=${id}`,
       expiresAtMs,
@@ -182,7 +212,17 @@ export function registerMedia(bb: BbPluginApi) {
         return streamResponse({
           request: c.req.raw,
           ...info,
-          mime: mediaTypes[item.path.split(".").pop()!.toLowerCase()],
+          mime: item.htmlBase
+            ? "text/html; charset=utf-8"
+            : mediaTypes[item.path.split(".").pop()!.toLowerCase()],
+          ...(item.htmlBase
+            ? {
+                prefix: new TextEncoder().encode(
+                  htmlPreviewDocument("", item.htmlBase),
+                ),
+                csp: "sandbox allow-scripts; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'self'",
+              }
+            : {}),
           read: async (offset, length, signal) => {
             const result = await host.call(
               "chunk",

@@ -18,7 +18,6 @@ export default experimental_defineHostEntry({
   dispose: () => video.dispose(),
   handlers: {
     resolve: (input) => resolveFilePath(input),
-    html: ({ path }) => readText(path, 2 * 1024 * 1024),
     videoInfo: ({ path }, ctx) => inspectVideo(path, ctx.signal),
     videoPoster: ({ path, time }, ctx) => videoPoster(path, time, ctx.signal),
     videoStart: ({ path, time }, ctx) =>

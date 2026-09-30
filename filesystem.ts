@@ -90,7 +90,10 @@ export async function listDirectory(
   };
 }
 export function resolveFilePath(input: { path: string; root?: string }) {
-  if (!input.root) return { path: resolvePath(input.path) };
+  if (!input.root) {
+    const path = resolvePath(input.path);
+    return { path, parent: dirname(path) };
+  }
   const root = resolvePath(input.root);
   if (
     isAbsolute(input.path) ||
@@ -102,7 +105,7 @@ export function resolveFilePath(input: { path: string; root?: string }) {
   const suffix = relative(root, path);
   if (suffix === ".." || suffix.startsWith(`..${sep}`) || isAbsolute(suffix))
     throw new Error("File path escapes its source directory.");
-  return { path };
+  return { path, parent: dirname(path) };
 }
 export async function readText(path: string, limit = MAX_TEXT_BYTES) {
   const file = await open(
