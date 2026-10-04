@@ -1,6 +1,6 @@
 # Release verification
 
-Files 0.3.1 is built against BB 0.44.0 and Plugin SDK 0.5.29. React and BB's source renderer are provided by the SDK runtime. Zod is the only runtime package dependency.
+Files 0.3.2 is built against BB 0.44.0 and Plugin SDK 0.5.29. React and BB's source renderer are provided by the SDK runtime. Zod is the only runtime package dependency.
 
 ## Automated checks
 
@@ -18,6 +18,14 @@ Files 0.3.1 is built against BB 0.44.0 and Plugin SDK 0.5.29. React and BB's sou
 Run commands and environment variables are documented in [README](README.md). Public screenshots contain only generated fixtures and the plugin surface.
 
 ## Assumptions and limits
+
+The 2026-10-04 audit passed all 17 backend tests, typechecking and the package
+check. Headless UI checks passed 12 tests, failed one and skipped the optional
+live-thread routing test. The failing regression is `source preview displays
+edited Markdown at the same path`: Files rereads the changed text, but BB's
+shared source renderer caches highlighted output by path and retains the old
+display. Formatted Markdown updates pass. The shared renderer needs a separate
+BB change; this plugin release does not fix it. The regression remains enabled.
 
 BB selects the first matching file opener when there is no extension preference; another plugin or an explicit built-in preference can win. Set the extension to Files in BB Settings when a guaranteed default is wanted. Preferences are per client. Unknown and extensionless links retain BB's existing handling.
 

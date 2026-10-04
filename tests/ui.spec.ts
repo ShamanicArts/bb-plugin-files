@@ -378,11 +378,17 @@ test("opt-in native player releases the old element on repeated close", async ({
       const v = document.querySelector("video");
       return v && v.readyState >= 2;
     });
-    await v.evaluate((v) => v.play());
+    await v.evaluate((v) => {
+      if (!(v instanceof HTMLVideoElement))
+        throw new Error("Expected a video element");
+      return v.play();
+    });
     await page.waitForFunction(
       () => document.querySelector("video")!.currentTime > 0,
     );
     await v.evaluate((v) => {
+      if (!(v instanceof HTMLVideoElement))
+        throw new Error("Expected a video element");
       v.currentTime = 9;
     });
     await page.waitForFunction(() => {
@@ -395,10 +401,11 @@ test("opt-in native player releases the old element on repeated close", async ({
       .click();
     await expect(v).toHaveCount(0);
     expect(
-      await old!.evaluate((v) => ({
-        paused: v.paused,
-        src: v.getAttribute("src"),
-      })),
+      await old!.evaluate((v) => {
+        if (!(v instanceof HTMLVideoElement))
+          throw new Error("Expected a video element");
+        return { paused: v.paused, src: v.getAttribute("src") };
+      }),
     ).toEqual({ paused: true, src: null });
     await old!.dispose();
   }
@@ -478,7 +485,12 @@ test("compatibility video renders moving frames, seeks, pauses and releases audi
   await expect(canvas).toBeVisible();
   await expect(player.locator('[role="status"]')).toHaveCount(0);
   await expect(page.locator("video")).toHaveCount(0);
-  const frame = () => canvas.evaluate((c) => c.toDataURL());
+  const frame = () =>
+    canvas.evaluate((c) => {
+      if (!(c instanceof HTMLCanvasElement))
+        throw new Error("Expected a canvas element");
+      return c.toDataURL();
+    });
   const poster = await frame();
   for (let i = 0; i < 3; i++) {
     await page

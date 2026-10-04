@@ -35,6 +35,11 @@ HTML opens as an interactive document with a **View source** toggle. Relative as
 
 Markdown opens as a formatted document with **View source** / **Render Markdown** controls. Line-specific Markdown links open source. Open text and Markdown previews check for changes every two seconds while the document is visible and when focus returns. Unchanged content preserves text selection; **Refresh** also rereads the preview even when file size and modification time are unchanged.
 
+Known BB renderer issue: highlighted source can retain old text after a file is
+edited at the same path, even though Files has reread it. Formatted Markdown
+updates correctly. The failing source-refresh regression is recorded in
+[VERIFICATION.md](VERIFICATION.md) pending a separate BB fix.
+
 Files claims only known previewable extensions. Extensionless files can be browsed as text inside Files, while unsupported file links such as PDF and archives retain BB's existing handling.
 
 ![Interactive HTML report](docs/screenshots/html.png)

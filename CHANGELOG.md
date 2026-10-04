@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.2 — 2026-10-04
+
+- Preserve selected preview text when copying, while folder-list copy still copies file paths.
+- Render Markdown and reread changed preview text while visible, including edits that preserve size and modification time.
+- Cancel old preview reads on navigation and closure; manual refresh rereads unchanged listing entries.
+- Keep the source-refresh regression enabled and document BB’s shared renderer cache issue for a separate fix.
+
 ## 0.3.1 — 2026-09-30
 
 - Removed the HTML preview file-size cap. Complete HTML now streams over HTTP from local or connected machines, including documents larger than the host RPC message limit.
