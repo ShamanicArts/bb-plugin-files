@@ -103,6 +103,7 @@ export default function plugin(bb: BbPluginApi) {
       },
       list: ({ hostId, ...input }) => host.call("list", input, { hostId }),
       text: ({ hostId, ...input }) => host.call("text", input, { hostId }),
+      info: ({ hostId, ...input }) => host.call("info", input, { hostId }),
       media: ({ hostId, path }) => media.lease(hostId, path),
       preview: async ({ hostId, path }) => {
         const key = JSON.stringify([hostId, path]);

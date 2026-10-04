@@ -16,6 +16,7 @@ import {
   useBbContext,
   useBbNavigate,
   useComposer,
+  Markdown,
   experimental_SourceCode as SourceCode,
   type PluginFileOpenerProps,
 } from "@get-bb/plugin-sdk/app";
@@ -162,7 +163,9 @@ function Preview({
   onCopy,
   onUse,
   lineRange,
+  refreshRevision,
 }: {
+  refreshRevision: number;
   lineRange?: { startLineNumber: number; endLineNumber: number } | null;
   entry: Entry;
   hostId: string;
@@ -193,9 +196,9 @@ function Preview({
         : null,
     [lineRange],
   );
-  const [renderHtml, setRenderHtml] = useState(!lineRange);
+  const [renderDocument, setRenderDocument] = useState(!lineRange);
   useEffect(() => {
-    if (lineRange) setRenderHtml(false);
+    if (lineRange) setRenderDocument(false);
   }, [lineRange]);
   const [wrap, setWrap] = useState(false);
   const [zoom, setZoom] = useState(false);
@@ -206,30 +209,82 @@ function Preview({
   const [htmlUrl, setHtmlUrl] = useState<string | null>(null);
 
   const kind = fileKind(entry);
+  const isMarkdown = /\.md$/i.test(entry.name);
   const isMedia = ["image", "video", "audio"].includes(kind);
   useEffect(() => {
     let alive = true;
+    let loading = false;
+    let identity: string | null = null;
+    let timer: ReturnType<typeof setTimeout>;
     setText(null);
     setError("");
     setZoom(false);
     setMediaError(false);
-    if (!isMedia && entry.kind === "file" && (kind !== "html" || !renderHtml))
-      rpc.call("text", { hostId, path: entry.path }).then(
-        (v) => {
-          if (alive) setText(v);
-        },
-        (e) => {
-          if (alive) setError(String(e.message || e));
-        },
-      );
+    if (isMedia || entry.kind !== "file" || (kind === "html" && renderDocument))
+      return;
+    const load = async () => {
+      if (!alive || loading) return;
+      clearTimeout(timer);
+      loading = true;
+      try {
+        const info = await rpc.call("info", { hostId, path: entry.path });
+        if (!alive) return;
+        if (identity !== info.identity) {
+          const value = await rpc.call("text", { hostId, path: entry.path });
+          if (!alive) return;
+          setText((old) =>
+            old &&
+            old.content === value.content &&
+            old.binary === value.binary &&
+            old.truncated === value.truncated &&
+            old.size === value.size
+              ? old
+              : value,
+          );
+          identity = info.identity;
+        }
+        setError("");
+      } catch (e) {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        loading = false;
+        if (alive) {
+          clearTimeout(timer);
+          timer = setTimeout(check, 2000);
+        }
+      }
+    };
+    const check = () => {
+      if (document.visibilityState === "hidden") {
+        clearTimeout(timer);
+        timer = setTimeout(check, 2000);
+      } else void load();
+    };
+    void load();
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
     return () => {
       alive = false;
+      clearTimeout(timer);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
     };
-  }, [entry.path, entry.modified, hostId, isMedia, kind, renderHtml, rpc]);
+  }, [
+    entry.path,
+    entry.modified,
+    entry.size,
+    entry.kind,
+    hostId,
+    isMedia,
+    kind,
+    renderDocument,
+    refreshRevision,
+    rpc,
+  ]);
   useEffect(() => {
     let alive = true;
     setHtmlUrl(null);
-    if (kind === "html" && renderHtml)
+    if (kind === "html" && renderDocument)
       rpc.call("html", { hostId, path: entry.path }).then(
         (v) => {
           if (alive) setHtmlUrl(v.url);
@@ -241,7 +296,16 @@ function Preview({
     return () => {
       alive = false;
     };
-  }, [entry.path, entry.modified, hostId, kind, renderHtml, rpc]);
+  }, [
+    entry.path,
+    entry.modified,
+    entry.size,
+    hostId,
+    kind,
+    renderDocument,
+    refreshRevision,
+    rpc,
+  ]);
   useEffect(() => {
     let alive = true;
     setStreamUrl(null);
@@ -297,6 +361,7 @@ function Preview({
       </header>
       <div
         className={`ff-preview-body ${kind === "image" ? "ff-image-stage" : ""} ${zoom ? "ff-zoomed" : ""}`}
+        tabIndex={0}
       >
         {entry.kind === "directory" ? (
           <div className="ff-preview-empty">
@@ -377,7 +442,7 @@ function Preview({
           <div className="ff-empty" role="alert">
             {error}
           </div>
-        ) : kind === "html" && renderHtml ? (
+        ) : kind === "html" && renderDocument ? (
           htmlUrl ? (
             <iframe
               className="ff-html-preview"
@@ -398,13 +463,21 @@ function Preview({
             <span>{sizeLabel(text.size)}</span>
           </div>
         ) : (
-          <div className="ff-source">
-            <SourceCode
-              content={text.content}
-              path={entry.path}
-              highlightedLines={highlightedLines}
-              overflow={wrap ? "wrap" : "scroll"}
-            />
+          <div
+            className={
+              isMarkdown && renderDocument ? "ff-markdown" : "ff-source"
+            }
+          >
+            {isMarkdown && renderDocument ? (
+              <Markdown content={text.content} />
+            ) : (
+              <SourceCode
+                content={text.content}
+                path={entry.path}
+                highlightedLines={highlightedLines}
+                overflow={wrap ? "wrap" : "scroll"}
+              />
+            )}
             {text.truncated && (
               <p className="ff-truncated">
                 Showing the bounded beginning of this file. Download it to view
@@ -436,22 +509,29 @@ function Preview({
                 active={zoom}
               />
             )}{" "}
-            {kind === "html" && (
+            {(kind === "html" || isMarkdown) && (
               <button
                 className="ff-html-toggle"
-                onClick={() => setRenderHtml((v) => !v)}
+                onClick={() => setRenderDocument((v) => !v)}
               >
-                {renderHtml ? "View source" : "Render HTML"}
+                {renderDocument
+                  ? "View source"
+                  : isMarkdown
+                    ? "Render Markdown"
+                    : "Render HTML"}
               </button>
             )}
-            {!isMedia && text && !text.binary && (
-              <Tool
-                icon="wrap"
-                label="Wrap lines"
-                active={wrap}
-                onClick={() => setWrap(!wrap)}
-              />
-            )}
+            {!isMedia &&
+              text &&
+              !text.binary &&
+              !(isMarkdown && renderDocument) && (
+                <Tool
+                  icon="wrap"
+                  label="Wrap lines"
+                  active={wrap}
+                  onClick={() => setWrap(!wrap)}
+                />
+              )}
             <Tool icon="copy" label="Copy file path" onClick={onCopy} />
             {kind !== "video" && kind !== "audio" && (
               <Tool
@@ -667,6 +747,7 @@ function FilesBrowser({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cursor, setCursor] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(true);
+  const [refreshRevision, setRefreshRevision] = useState(0);
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -742,6 +823,7 @@ function FilesBrowser({
           setExpanded(false);
           anchor.current = null;
         } else {
+          setRefreshRevision((value) => value + 1);
           setSelected(
             (old) =>
               new Set(
@@ -944,6 +1026,7 @@ function FilesBrowser({
     if (listRef.current) listRef.current.scrollTop = 0;
   };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
     const input =
       event.target instanceof HTMLElement &&
       ([
@@ -993,11 +1076,18 @@ function FilesBrowser({
     }
     if (input) return;
     if (mod && event.key === "a") {
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest(".ff-preview")
+      )
+        return;
       event.preventDefault();
       setSelected(new Set(visible.map((e) => e.path)));
       return;
     }
     if (mod && event.key === "c") {
+      const selection = event.currentTarget.ownerDocument.getSelection();
+      if (selection && !selection.isCollapsed && selection.toString()) return;
       event.preventDefault();
       void copy(
         selected.size ? [...selected] : location ? [location.path] : [],
@@ -1415,6 +1505,7 @@ function FilesBrowser({
         </div>
         {previewOpen && current && location ? (
           <Preview
+            refreshRevision={refreshRevision}
             key={`${location.hostId}:${current.path}`}
             entry={current}
             lineRange={current.path === initialTarget?.path ? lineRange : null}

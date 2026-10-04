@@ -1,5 +1,12 @@
 import { test, expect } from "@playwright/test";
-import { mkdir, writeFile, mkdtemp, copyFile, rm } from "node:fs/promises";
+import {
+  mkdir,
+  writeFile,
+  mkdtemp,
+  copyFile,
+  rm,
+  utimes,
+} from "node:fs/promises";
 import { join } from "node:path";
 const fixture = join(process.cwd(), "artifacts", "fixtures", "Studio");
 test.beforeAll(async () => {
@@ -27,6 +34,236 @@ async function go(page: import("@playwright/test").Page, path: string) {
     "false",
   );
 }
+test("copying preview text preserves the selection and file-list copy still copies paths", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const root = await mkdtemp(join(fixture, "copy-test-"));
+  const file = join(root, "selection.txt");
+  const content = "Copy this selected sentence.\n";
+  await writeFile(file, content);
+  try {
+    await go(page, file);
+    const source = page.locator(".ff-source");
+    await expect(source).toContainText(content.trim());
+    await page.locator(".ff-browser").focus();
+    await source.locator("code").evaluate((element) => {
+      const selected = "selected sentence";
+      const start = element.textContent!.indexOf(selected);
+      if (start < 0) throw new Error("Selection fixture was not rendered");
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      let offset = 0;
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const end = offset + node.textContent!.length;
+        if (offset <= start && start < end)
+          range.setStart(node, start - offset);
+        if (
+          offset < start + selected.length &&
+          start + selected.length <= end
+        ) {
+          range.setEnd(node, start + selected.length - offset);
+          document.getSelection()!.removeAllRanges();
+          document.getSelection()!.addRange(range);
+          return;
+        }
+        offset = end;
+      }
+      throw new Error("Selection fixture was not rendered");
+    });
+    // A background change check must not replace unchanged preview DOM.
+    await page.waitForTimeout(2300);
+    expect(await page.evaluate(() => document.getSelection()?.toString())).toBe(
+      "selected sentence",
+    );
+    await page.keyboard.press("Control+c");
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe("selected sentence");
+    await page.evaluate(() => document.getSelection()!.removeAllRanges());
+    await page.getByRole("listbox").focus();
+    await page.keyboard.press("Control+c");
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(file);
+    await page
+      .getByRole("button", { name: "Copy file path", exact: true })
+      .click();
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe(file);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Markdown renders and updates after edits with unchanged size and modification time", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const root = await mkdtemp(join(fixture, "markdown-test-"));
+  const file = join(root, "document.md");
+  const timestamp = new Date("2026-01-01T00:00:00Z");
+  await writeFile(file, "# Prior heading\n\nA **bold** paragraph.\n");
+  await utimes(file, timestamp, timestamp);
+  try {
+    await go(page, file);
+    await expect(
+      page.getByRole("heading", { name: "Prior heading", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".ff-markdown strong")).toHaveText("bold");
+    await page.locator(".ff-preview-body").focus();
+    await page.locator(".ff-markdown p").evaluate((paragraph) => {
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      document.getSelection()!.removeAllRanges();
+      document.getSelection()!.addRange(range);
+    });
+    await page.keyboard.press("Control+c");
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe("A bold paragraph.");
+    await writeFile(file, "# After heading\n\nA **bold** paragraph.\n");
+    await utimes(file, timestamp, timestamp);
+    await expect(
+      page.getByRole("heading", { name: "After heading", exact: true }),
+    ).toBeVisible({ timeout: 10000 });
+    await expect(
+      page.getByRole("heading", { name: "Prior heading", exact: true }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "View source", exact: true })
+      .click();
+    await expect(page.locator(".ff-source")).toContainText("# After heading");
+    await page
+      .getByRole("button", { name: "Render Markdown", exact: true })
+      .click();
+    await writeFile(file, "# Later heading\n\nA **bold** paragraph.\n");
+    await utimes(file, timestamp, timestamp);
+    await expect(
+      page.getByRole("heading", { name: "Later heading", exact: true }),
+    ).toBeVisible({ timeout: 10000 });
+    // A transient missing file recovers when the file becomes readable again.
+    await rm(file);
+    await expect(page.locator(".ff-preview [role=alert]")).toBeVisible({
+      timeout: 10000,
+    });
+    await writeFile(file, "# Saved again\n");
+    await expect(
+      page.getByRole("heading", { name: "Saved again", exact: true }),
+    ).toBeVisible({ timeout: 10000 });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("source preview displays edited Markdown at the same path", async ({
+  page,
+}) => {
+  const root = await mkdtemp(join(fixture, "source-update-test-"));
+  const file = join(root, "document.md");
+  await writeFile(file, "# Before save\n");
+  try {
+    await go(page, file);
+    await expect(
+      page.getByRole("heading", { name: "Before save", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "View source", exact: true })
+      .click();
+    await expect(page.locator(".ff-source")).toContainText("# Before save");
+    await writeFile(file, "# After save\n");
+    await expect(page.locator(".ff-source")).toContainText("# After save", {
+      timeout: 10000,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("switching and closing previews discard late reads and stop change checks", async ({
+  page,
+}) => {
+  const root = await mkdtemp(join(fixture, "lifecycle-test-"));
+  const first = join(root, "first.md");
+  const second = join(root, "second.md");
+  await writeFile(first, "# First document\n");
+  await writeFile(second, "# Second document\n");
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let firstReadPending = false;
+  let firstReadReleased = false;
+  let checks = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/plugins/files/rpc/info")) checks++;
+  });
+  await page.route("**/plugins/files/rpc/text", async (route) => {
+    if (route.request().postDataJSON().path !== first) {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    firstReadPending = true;
+    await held;
+    await route.fulfill({ response });
+    firstReadReleased = true;
+  });
+  try {
+    await go(page, first);
+    await expect.poll(() => firstReadPending).toBe(true);
+    await go(page, second);
+    await expect(
+      page.getByRole("heading", { name: "Second document", exact: true }),
+    ).toBeVisible();
+    release();
+    await expect.poll(() => firstReadReleased).toBe(true);
+    await expect(
+      page.getByRole("heading", { name: "Second document", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "First document", exact: true }),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Close preview (Escape)", exact: true })
+      .click();
+    const checksAtClose = checks;
+    await page.waitForTimeout(2500);
+    expect(checks).toBe(checksAtClose);
+  } finally {
+    release();
+    await page.unroute("**/plugins/files/rpc/text");
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("manual refresh rereads text when listing metadata has not changed", async ({
+  page,
+}) => {
+  const root = await mkdtemp(join(fixture, "refresh-test-"));
+  const file = join(root, "document.txt");
+  const timestamp = new Date("2026-01-01T00:00:00Z");
+  await writeFile(file, "Before refresh");
+  await utimes(file, timestamp, timestamp);
+  try {
+    await go(page, file);
+    await expect(page.locator(".ff-source")).toContainText("Before refresh");
+    await writeFile(file, "After! refresh");
+    await utimes(file, timestamp, timestamp);
+    await page
+      .getByRole("button", { name: "Refresh folder (F5)", exact: true })
+      .click();
+    await expect(page.locator(".ff-source")).toContainText("After! refresh", {
+      timeout: 1500,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 test("path navigation, filters, history, hidden files and selection", async ({
   page,
 }) => {

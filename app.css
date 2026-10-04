@@ -629,6 +629,13 @@
 .ff-source > div {
   min-height: 100%;
 }
+.ff-markdown {
+  width: 100%;
+  min-width: 0;
+  padding: 20px;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
 .ff-preview-placeholder {
   justify-content: center;
   align-items: center;

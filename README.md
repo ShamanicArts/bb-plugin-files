@@ -4,7 +4,7 @@ A compact, path-first file browser and picker. Open **Files** from the sidebar, 
 
 - Editable absolute, relative, `~`, and `file://` paths, breadcrumbs, back/forward, and parent navigation.
 - List, thumbnail grid, and two-column directory navigation. Large lists render only the visible rows.
-- Source preview with BB's syntax highlighting, image fit/actual size, video and audio playback, and next/previous file browsing.
+- Formatted Markdown and source previews with BB's syntax highlighting, image fit/actual size, video and audio playback, and next/previous file browsing.
 - Folder filtering, hidden files, name/modified/size sorting, persistent bookmarks and view preference.
 - Multi-select with Ctrl/Cmd-click, Shift-click, or Ctrl/Cmd-A. Copy paths or **Use in chat** to insert quoted paths into the draft. This does not send a message or upload attachments.
 - An explicit machine selector for local and remote BB hosts.
@@ -33,6 +33,8 @@ Files registers BB's supported file-opener hook for HTML, source/text, images, v
 
 HTML opens as an interactive document with a **View source** toggle. Relative assets resolve from the file's directory on its machine. Scripts run in an opaque-origin sandbox and cannot access BB's DOM or cookies. Native embedded media, child frames, objects and popups are disabled. Module scripts/fetches that require same-origin access, absolute filesystem assets, parent-directory assets, and apps requiring a backend may not work; serve those apps normally. HTML documents stream in full without a file-size cap. Line-specific HTML links open source instead.
 
+Markdown opens as a formatted document with **View source** / **Render Markdown** controls. Line-specific Markdown links open source. Open text and Markdown previews check for changes every two seconds while the document is visible and when focus returns. Unchanged content preserves text selection; **Refresh** also rereads the preview even when file size and modification time are unchanged.
+
 Files claims only known previewable extensions. Extensionless files can be browsed as text inside Files, while unsupported file links such as PDF and archives retain BB's existing handling.
 
 ![Interactive HTML report](docs/screenshots/html.png)
@@ -50,7 +52,7 @@ Files claims only known previewable extensions. Extensionless files can be brows
 | Space | Expand/collapse quick look |
 | Escape | Collapse quick look, clear filter, or close preview |
 | Ctrl/Cmd Enter | Insert selected paths into chat |
-| Ctrl/Cmd C | Copy selected paths |
+| Ctrl/Cmd C | Copy selected text, otherwise selected paths |
 | Ctrl/Cmd . | Show hidden files |
 | Ctrl/Cmd 1 / 2 / 3 | List / grid / columns |
 | F5 | Refresh directory |
@@ -87,7 +89,7 @@ The frontend uses React/TypeScript and the installed BB theme and source rendere
 
 ## RPC
 
-Inspect contracts with `bb plugin rpc inspect files`. Methods: `resolveFile`, `context`, `list`, `text`, `html` (full document stream), `preview` (images), `media` (bounded file stream), and `videoInfo`, `videoPoster`, `videoStart`, `videoPoll`, `videoStop` (compatibility playback). For example, save `{"hostId":"<machine-id>","path":"~"}` to an input file and run:
+Inspect contracts with `bb plugin rpc inspect files`. Methods: `resolveFile`, `context`, `list`, `text`, `info` (file size, modification time and identity), `html` (full document stream), `preview` (images), `media` (bounded file stream), and `videoInfo`, `videoPoster`, `videoStart`, `videoPoll`, `videoStop` (compatibility playback). For example, save `{"hostId":"<machine-id>","path":"~"}` to an input file and run:
 
 ```sh
 bb plugin rpc call files list --input-file input.json --json

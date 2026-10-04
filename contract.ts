@@ -154,6 +154,10 @@ export const rpcContract = defineRpcContract({
     input: hostContract.text.input.extend({ hostId: z.string().min(1) }),
     output: hostContract.text.output,
   },
+  info: {
+    input: hostContract.info.input.extend({ hostId: z.string().min(1) }),
+    output: hostContract.info.output,
+  },
   media: {
     input: z.object({ hostId: z.string().min(1), path: pathSchema }),
     output: z.object({ url: z.string(), expiresAtMs: z.number() }),
