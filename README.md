@@ -33,6 +33,8 @@ Files registers BB's supported file-opener hook for HTML, source/text, images, v
 
 HTML opens as an interactive document with a **View source** toggle. Relative assets resolve from the file's directory on its machine. Scripts run in an opaque-origin sandbox and cannot access BB's DOM or cookies. Native embedded media, child frames, objects and popups are disabled. Module scripts/fetches that require same-origin access, absolute filesystem assets, parent-directory assets, and apps requiring a backend may not work; serve those apps normally. HTML documents stream in full without a file-size cap. Line-specific HTML links open source instead.
 
+Switching threads or leaving Files preserves the live HTML page in the current BB window, including its navigation, chosen theme, scroll position and unsaved form state. Files also restores the selected file and expanded preview. The page keeps its own dark-mode controls; BB does not replace them. Up to 16 inactive HTML pages are retained, separately per thread/file tab. **Refresh**, a changed HTML file, reloading BB or reloading the plugin starts a new page. A full BB restart does not restore arbitrary website runtime state.
+
 Markdown opens as a formatted document with **View source** / **Render Markdown** controls. Line-specific Markdown links open source. Open text and Markdown previews check for changes every two seconds while the document is visible and when focus returns. Unchanged content preserves text selection; **Refresh** also rereads the preview even when file size and modification time are unchanged.
 
 Known BB renderer issue: highlighted source can retain old text after a file is
@@ -91,6 +93,8 @@ bb plugin install . --yes
 The frontend uses React/TypeScript and the installed BB theme and source renderer. The host entry is portable Node, distributed by BB to connected machines. There is no Rust/Wasm build dependency: filesystem I/O and media decoding are handled by BB host workers and existing FFmpeg software decoders.
 
 `npm run test:ui` runs headless Chromium against the running BB server (`BB_SERVER_URL`, with a local fallback). The live UI suite uses the local fixture directory under `artifacts/fixtures/Studio`, prepared by `npm run fixtures`; it requires Files installed and loaded. `CHROMIUM_PATH` overrides `/usr/bin/chromium`. It does not launch visible windows or send chat messages.
+
+Set `BB_THREAD_ID` and `BB_OTHER_THREAD_ID` to existing threads on the fixture machine to test the HTML file-tab round trip. The test creates a temporary file in the first thread's directory, opens its tab, switches to the second thread and back, then closes the test tab and removes the fixture.
 
 ## RPC
 

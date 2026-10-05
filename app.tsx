@@ -33,16 +33,35 @@ import {
 import { Glyph, FileGlyph } from "./icons";
 import { SUPPORTED_EXTENSIONS } from "./supported-files";
 import { SafeVideo } from "./safe-video";
+import { HtmlPreview, HtmlSessionLayer } from "./html-session";
 import "./app.css";
 type View = "list" | "grid" | "columns";
 type Location = { hostId: string; path: string };
-function sessionLocation(key: string): Location | null {
+type SavedLocation = Location & {
+  selectedPath?: string;
+  previewOpen?: boolean;
+  expanded?: boolean;
+};
+function sessionLocation(key: string): SavedLocation | null {
   try {
     const item = JSON.parse(sessionStorage.getItem(key) || "null");
     return item &&
       typeof item.hostId === "string" &&
       typeof item.path === "string"
-      ? item
+      ? {
+          hostId: item.hostId,
+          path: item.path,
+          selectedPath:
+            typeof item.selectedPath === "string"
+              ? item.selectedPath
+              : undefined,
+          previewOpen:
+            typeof item.previewOpen === "boolean"
+              ? item.previewOpen
+              : undefined,
+          expanded:
+            typeof item.expanded === "boolean" ? item.expanded : undefined,
+        }
       : null;
   } catch {
     return null;
@@ -164,7 +183,9 @@ function Preview({
   onUse,
   lineRange,
   refreshRevision,
+  sessionKey,
 }: {
+  sessionKey: string;
   refreshRevision: number;
   lineRange?: { startLineNumber: number; endLineNumber: number } | null;
   entry: Entry;
@@ -206,7 +227,6 @@ function Preview({
   const [mediaError, setMediaError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
-  const [htmlUrl, setHtmlUrl] = useState<string | null>(null);
 
   const kind = fileKind(entry);
   const isMarkdown = /\.md$/i.test(entry.name);
@@ -276,31 +296,6 @@ function Preview({
     entry.kind,
     hostId,
     isMedia,
-    kind,
-    renderDocument,
-    refreshRevision,
-    rpc,
-  ]);
-  useEffect(() => {
-    let alive = true;
-    setHtmlUrl(null);
-    if (kind === "html" && renderDocument)
-      rpc.call("html", { hostId, path: entry.path }).then(
-        (v) => {
-          if (alive) setHtmlUrl(v.url);
-        },
-        (e) => {
-          if (alive) setError(String(e.message || e));
-        },
-      );
-    return () => {
-      alive = false;
-    };
-  }, [
-    entry.path,
-    entry.modified,
-    entry.size,
-    hostId,
     kind,
     renderDocument,
     refreshRevision,
@@ -443,17 +438,14 @@ function Preview({
             {error}
           </div>
         ) : kind === "html" && renderDocument ? (
-          htmlUrl ? (
-            <iframe
-              className="ff-html-preview"
-              title={`HTML preview of ${entry.name}`}
-              sandbox="allow-scripts"
-              referrerPolicy="no-referrer"
-              src={htmlUrl}
-            />
-          ) : (
-            <div className="ff-loading">Loading HTML…</div>
-          )
+          <HtmlPreview
+            sessionKey={sessionKey}
+            hostId={hostId}
+            path={entry.path}
+            name={entry.name}
+            signature={`${entry.modified}:${entry.size}`}
+            refreshRevision={refreshRevision}
+          />
         ) : !text ? (
           <div className="ff-loading">Loading preview…</div>
         ) : text.binary ? (
@@ -715,14 +707,16 @@ function FilesBrowser({
   initialTarget,
   lineRange,
   onUse,
+  sessionScope,
 }: {
+  sessionScope?: string;
   threadId?: string | null;
   projectId?: string | null;
   initialTarget?: { hostId: string; path: string };
   lineRange?: { startLineNumber: number; endLineNumber: number } | null;
   onUse: (paths: string[]) => void;
 }) {
-  const scopeKey = `bb-files:location:${threadId || projectId || "standalone"}`;
+  const scopeKey = `bb-files:location:${sessionScope || threadId || projectId || "standalone"}${initialTarget ? `:${JSON.stringify(initialTarget)}` : ""}`;
   const rpc = useRpc<typeof rpcContract>();
   const [context, setContext] = useState<{
     hostId: string;
@@ -773,6 +767,7 @@ function FilesBrowser({
     index: -1,
   });
   const request = useRef(0);
+  const locationScope = useRef<string | null>(null);
   const pathRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -808,11 +803,9 @@ function FilesBrowser({
         });
         if (token !== request.current) return;
         const loc = { hostId, path: result.path };
+        locationScope.current = scopeKey;
         setListing(result);
         setLocation(loc);
-        try {
-          sessionStorage.setItem(scopeKey, JSON.stringify(loc));
-        } catch {}
         setPathInput(result.path);
         setQuery("");
         setBase(null);
@@ -873,12 +866,20 @@ function FilesBrowser({
         if (alive) {
           setContext(c);
           if (request.current === initialRequest) {
-            const saved = initialTarget || sessionLocation(scopeKey);
+            const saved = sessionLocation(scopeKey);
             void navigate(
-              saved?.path || c.path,
-              saved?.hostId || c.hostId,
+              initialTarget?.path ||
+                saved?.selectedPath ||
+                saved?.path ||
+                c.path,
+              initialTarget?.hostId || saved?.hostId || c.hostId,
             ).then((ok) => {
-              if (alive && ok && initialTarget) setExpanded(true);
+              if (alive && !ok && !initialTarget && saved?.selectedPath)
+                return navigate(saved.path, saved.hostId);
+              if (alive && ok) {
+                setExpanded(saved?.expanded ?? Boolean(initialTarget));
+                setPreviewOpen(saved?.previewOpen ?? true);
+              }
             });
           }
         }
@@ -895,6 +896,20 @@ function FilesBrowser({
       ++request.current;
     };
   }, [threadId, projectId, rpc, navigate, scopeKey, initialTarget]);
+  useEffect(() => {
+    if (!location || locationScope.current !== scopeKey) return;
+    try {
+      sessionStorage.setItem(
+        scopeKey,
+        JSON.stringify({
+          ...location,
+          selectedPath: cursor || undefined,
+          previewOpen,
+          expanded,
+        }),
+      );
+    } catch {}
+  }, [location, cursor, previewOpen, expanded, scopeKey]);
   useEffect(() => {
     if (!location) return;
     let alive = true;
@@ -1505,6 +1520,11 @@ function FilesBrowser({
         </div>
         {previewOpen && current && location ? (
           <Preview
+            sessionKey={JSON.stringify([
+              scopeKey,
+              location.hostId,
+              current.path,
+            ])}
             refreshRevision={refreshRevision}
             key={`${location.hostId}:${current.path}`}
             entry={current}
@@ -1596,6 +1616,7 @@ function PageFiles() {
   const navigate = useBbNavigate();
   return (
     <FilesBrowser
+      sessionScope="standalone"
       projectId={context.projectId}
       onUse={(paths) =>
         navigate.toCompose({
@@ -1668,6 +1689,10 @@ function OpenedFile({
   );
 }
 export default definePluginApp((app) => {
+  app.slots.experimental_appOverlay({
+    id: "html-sessions",
+    component: HtmlSessionLayer,
+  });
   app.slots.fileOpener({
     id: "viewer",
     title: "Files",

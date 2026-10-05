@@ -39,4 +39,6 @@ Linux local and remote hosts are tested. macOS and Windows are unverified. The G
 
 ## Fixed regressions
 
+HTML session regression checks leave Files for a BB thread and return, and open an HTML file tab in one thread before switching to a second thread and back. They verify the selected file, expanded preview, iframe identity, inner-page navigation, dark-mode choice, unsaved text and a JavaScript runtime marker without another HTML RPC. Resize and source-toggle checks keep the live page while preserving usable preview controls; explicit Refresh reloads it. The original sandbox and complete large-HTML checks remain enabled.
+
 The folder-scroll failure was reproduced as `TypeError: Cannot read properties of null (reading 'scrollTop')`, a React UI exception. The handler retained an event inside a deferred updater after React cleared `currentTarget`. Capturing the numeric scroll position synchronously fixes the event lifetime. The regression checks wheel scrolling and opening folders afterward in list, grid and column views.

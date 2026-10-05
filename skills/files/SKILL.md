@@ -25,4 +25,6 @@ The browser is read-only. Ctrl/Cmd+C copies selected preview text; explicit Copy
 
 Build/reload using `bb plugin build <path>` and `bb plugin reload files`. Inspect failures using `bb plugin logs files`.
 
+HTML previews retain their live iframe while switching threads in the same BB window, preserving the website's navigation, theme choice and form state. Files restores the selected file and preview expansion. Up to 16 inactive pages are retained per window; Refresh, file changes, app refresh/restart and plugin reload reset runtime state. Do not describe this as website persistence across BB restarts.
+
 Files registers BB file openers for known HTML, text/source, image and media extensions. BB chooses the first matching opener by default; Settings → File openers controls per-extension choices separately on each client. Respect existing choices and do not claim that registration overwrites them.

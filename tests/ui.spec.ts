@@ -634,12 +634,124 @@ test("HTML renders interactive local assets in a sandbox and can switch to sourc
   await expect(frame.locator("output")).toHaveText("Clicked");
   expect(mediaRequests).toEqual([]);
   await page.getByRole("button", { name: "View source", exact: true }).click();
-  await expect(page.locator("iframe")).toHaveCount(0);
+  await expect(page.locator("iframe:visible")).toHaveCount(0);
   await expect(page.locator(".ff-source")).toContainText("Interactive report");
   await page.getByRole("button", { name: "Render HTML", exact: true }).click();
   await expect(
     frame.getByRole("heading", { name: "Interactive report" }),
   ).toBeVisible();
+});
+
+test("HTML keeps its page, dark mode and form state after switching to a BB thread and back", async ({
+  page,
+}) => {
+  const root = await mkdtemp(join(fixture, "html-session-test-"));
+  const file = join(root, "index.html");
+  await writeFile(
+    file,
+    '<!doctype html><h1>Home page</h1><a href="details.html">Open details</a>',
+  );
+  await writeFile(
+    join(root, "details.html"),
+    `<!doctype html><html><head><style>
+    body { background: white; color: black; } body.dark { color-scheme: dark; background: #171717; color: white; }
+    </style></head><body><h1>Details page</h1><button onclick="document.body.classList.toggle('dark')">Toggle dark mode</button>
+    <label>Notes <input aria-label="Notes"></label><output id="runtime"></output>
+    <script>document.getElementById('runtime').textContent=String(Math.random());</script></body></html>`,
+  );
+  let htmlCalls = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/plugins/files/rpc/html")) htmlCalls++;
+  });
+  try {
+    await go(page, file);
+    const frame = page.frameLocator(
+      'iframe[title="HTML preview of index.html"]',
+    );
+    await expect(
+      frame.getByRole("heading", { name: "Home page", exact: true }),
+    ).toBeVisible();
+    await frame
+      .getByRole("link", { name: "Open details", exact: true })
+      .click();
+    await expect(
+      frame.getByRole("heading", { name: "Details page", exact: true }),
+    ).toBeVisible();
+    await frame
+      .getByRole("button", { name: "Toggle dark mode", exact: true })
+      .click();
+    await frame
+      .getByRole("textbox", { name: "Notes", exact: true })
+      .fill("Keep this unsaved text");
+    const runtime = await frame.locator("#runtime").textContent();
+    const original = await page
+      .locator('iframe[title="HTML preview of index.html"]')
+      .elementHandle();
+    const callsBefore = htmlCalls;
+    const thread = page.locator('a[href*="/threads/"]').first();
+    await thread.click();
+    await page.waitForURL(/\/threads\//);
+    await expect(
+      page.locator('iframe[title="HTML preview of index.html"]'),
+    ).toHaveCount(0);
+    await page
+      .getByRole("navigation", { name: "Sidebar navigation" })
+      .getByRole("button", { name: "Files", exact: true })
+      .click();
+    await expect(
+      page.getByRole("region", { name: "Preview of index.html", exact: true }),
+    ).toBeVisible();
+    await expect(
+      frame.getByRole("heading", { name: "Details page", exact: true }),
+    ).toBeVisible();
+    await expect(frame.locator("body")).toHaveClass("dark");
+    await expect(
+      frame.getByRole("textbox", { name: "Notes", exact: true }),
+    ).toHaveValue("Keep this unsaved text");
+    await expect(frame.locator("#runtime")).toHaveText(runtime!);
+    expect(htmlCalls).toBe(callsBefore);
+    expect(
+      await original!.evaluate(
+        (element) =>
+          element ===
+          document.querySelector('iframe[title="HTML preview of index.html"]'),
+      ),
+    ).toBe(true);
+    await page.setViewportSize({ width: 1000, height: 800 });
+    await expect(
+      frame.getByRole("button", { name: "Toggle dark mode", exact: true }),
+    ).toBeVisible();
+    const bounds = await page
+      .locator('iframe[title="HTML preview of index.html"]')
+      .boundingBox();
+    const anchor = await page.locator(".ff-html-placeholder").boundingBox();
+    expect(bounds!.width).toBeCloseTo(anchor!.width, 0);
+    // The retained iframe must stay clipped inside a short preview, leaving its toolbar clickable.
+    await page.setViewportSize({ width: 1000, height: 450 });
+    await page
+      .getByRole("button", { name: "View source", exact: true })
+      .click();
+    await expect(page.locator(".ff-source")).toBeVisible();
+    await expect(
+      page.locator('iframe[title="HTML preview of index.html"]'),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Render HTML", exact: true })
+      .click();
+    await expect(
+      frame.getByRole("heading", { name: "Details page", exact: true }),
+    ).toBeVisible();
+    await expect(frame.locator("body")).toHaveClass("dark");
+    await page
+      .getByRole("button", { name: "Refresh folder (F5)", exact: true })
+      .click();
+    await expect(
+      frame.getByRole("heading", { name: "Home page", exact: true }),
+    ).toBeVisible();
+    expect(htmlCalls).toBeGreaterThan(callsBefore);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("HTML larger than the RPC message limit renders its complete tail and interactive assets", async ({
@@ -679,6 +791,113 @@ test("HTML larger than the RPC message limit renders its complete tail and inter
   await page
     .locator(".ff-browser")
     .screenshot({ path: "artifacts/large-html-full.png" });
+});
+
+test("an HTML file tab preserves dark mode and runtime state across BB threads", async ({
+  page,
+}) => {
+  const threadId = process.env.BB_THREAD_ID;
+  const otherThreadId = process.env.BB_OTHER_THREAD_ID;
+  test.skip(
+    !threadId || !otherThreadId,
+    "Set BB_THREAD_ID and BB_OTHER_THREAD_ID for the live thread round trip.",
+  );
+  const response = await page.request.post(
+    "/api/v1/plugins/files/rpc/context",
+    { data: { threadId, projectId: null } },
+  );
+  const context = (await response.json()).result;
+  const root = await mkdtemp(join(context.path, "html-session-tab-test-"));
+  const filename = "session.html";
+  await writeFile(
+    join(root, filename),
+    `<!doctype html><html><body><h1>Retained thread page</h1>
+    <button onclick="document.body.dataset.theme='dark';document.body.style.background='#171717';document.body.style.color='white'">Choose dark mode</button>
+    <input aria-label="Unsaved note"><output id="runtime"></output><script>document.getElementById('runtime').textContent=String(Math.random());</script></body></html>`,
+  );
+  let htmlCalls = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/plugins/files/rpc/html")) htmlCalls++;
+  });
+  let opened = false;
+  try {
+    await page.goto(`/threads/${threadId}`);
+    await expect(
+      page.getByRole("button", {
+        name: /(?:Show|Hide) right panel \(Ctrl \+ J\)/,
+      }),
+    ).toBeVisible();
+    const show = page.getByRole("button", {
+      name: "Show right panel (Ctrl + J)",
+      exact: true,
+    });
+    if (await show.isVisible()) await show.click();
+    await page
+      .getByRole("button", { name: "Open new tab (Ctrl + T)", exact: true })
+      .click();
+    const search = page.getByRole("combobox", { name: /Search files/ });
+    await search.fill(root.split("/").at(-1)! + "/" + filename);
+    await expect(
+      page.getByRole("option").filter({ hasText: filename }).first(),
+    ).toBeVisible();
+    await search.press("Enter");
+    opened = true;
+    const frame = page.frameLocator(
+      `iframe[title="HTML preview of ${filename}"]`,
+    );
+    await expect(
+      frame.getByRole("heading", { name: "Retained thread page", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".ff-preview")).toHaveClass(/ff-expanded/);
+    await frame
+      .getByRole("button", { name: "Choose dark mode", exact: true })
+      .click();
+    await frame
+      .getByRole("textbox", { name: "Unsaved note", exact: true })
+      .fill("Keep my thread page");
+    const runtime = await frame.locator("#runtime").textContent();
+    const callsBefore = htmlCalls;
+    await page.locator(`a[href$="/threads/${otherThreadId}"]`).first().click();
+    await page.waitForURL(new RegExp(`/threads/${otherThreadId}$`));
+    await expect(
+      page.locator(`iframe[title="HTML preview of ${filename}"]`),
+    ).toHaveCount(0);
+    await page.locator(`a[href$="/threads/${threadId}"]`).first().click();
+    await page.waitForURL(new RegExp(`/threads/${threadId}$`));
+    await expect(
+      frame.getByRole("heading", { name: "Retained thread page", exact: true }),
+    ).toBeVisible();
+    await expect(frame.locator("body")).toHaveAttribute("data-theme", "dark");
+    await expect(
+      frame.getByRole("textbox", { name: "Unsaved note", exact: true }),
+    ).toHaveValue("Keep my thread page");
+    await expect(frame.locator("#runtime")).toHaveText(runtime!);
+    await expect(page.locator(".ff-preview")).toHaveClass(/ff-expanded/);
+    expect(htmlCalls).toBe(callsBefore);
+    await page
+      .getByRole("button", { name: filename, exact: true })
+      .last()
+      .hover();
+    await page
+      .getByRole("button", { name: `Close ${filename}`, exact: true })
+      .last()
+      .click();
+    opened = false;
+  } finally {
+    if (opened && page.url().endsWith(`/threads/${threadId}`)) {
+      const tab = page
+        .getByRole("button", { name: filename, exact: true })
+        .last();
+      if (await tab.isVisible()) {
+        await tab.hover();
+        await page
+          .getByRole("button", { name: `Close ${filename}`, exact: true })
+          .last()
+          .click();
+      }
+    }
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("BB file tabs use Files by default for HTML, source and compatibility video", async ({
