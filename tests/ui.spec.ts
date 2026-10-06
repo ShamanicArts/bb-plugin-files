@@ -34,6 +34,315 @@ async function go(page: import("@playwright/test").Page, path: string) {
     "false",
   );
 }
+for (const format of ["png", "jpg", "svg"] as const) {
+  test(`image copy writes full-resolution ${format} pixels and can be pasted`, async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const root = await mkdtemp(join(fixture, "image-copy-"));
+    const file = join(root, `image.${format}`);
+    try {
+      if (format === "jpg") {
+        await copyFile(join(fixture, "References", "Aether-light.jpg"), file);
+      } else if (format === "svg") {
+        await writeFile(
+          file,
+          '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="12"><rect width="10" height="12" fill="red"/></svg>',
+        );
+      } else {
+        const data = await page.evaluate(() => {
+          const canvas = document.createElement("canvas");
+          canvas.width = 20;
+          canvas.height = 12;
+          const ctx = canvas.getContext("2d")!;
+          ctx.fillStyle = "#ff0000";
+          ctx.fillRect(0, 0, 10, 12);
+          return canvas.toDataURL("image/png").split(",")[1];
+        });
+        await writeFile(file, Buffer.from(data, "base64"));
+      }
+      await go(page, file);
+      const image = page.locator(".ff-image-stage img");
+      await expect
+        .poll(() =>
+          image.evaluate(
+            (img: HTMLImageElement) => img.complete && img.naturalWidth > 0,
+          ),
+        )
+        .toBe(true);
+      const expected = await image.evaluate(async (img: HTMLImageElement) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0);
+        return {
+          width: canvas.width,
+          height: canvas.height,
+          pixels: Array.from(
+            new Uint8Array(
+              await crypto.subtle.digest(
+                "SHA-256",
+                ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+              ),
+            ),
+          ),
+        };
+      });
+      for (const action of ["button", "keyboard"]) {
+        await page.evaluate(() =>
+          navigator.clipboard.writeText("clipboard sentinel"),
+        );
+        if (action === "button")
+          await page
+            .getByRole("button", { name: "Copy image", exact: true })
+            .click();
+        else {
+          await page.locator(".ff-preview-body").focus();
+          await page.keyboard.press("Control+c");
+        }
+        await expect
+          .poll(() =>
+            page.evaluate(
+              async () => (await navigator.clipboard.read())[0].types,
+            ),
+          )
+          .toContain("image/png");
+        const actual = await page.evaluate(async () => {
+          const item = (await navigator.clipboard.read())[0];
+          const bitmap = await createImageBitmap(
+            await item.getType("image/png"),
+          );
+          const canvas = document.createElement("canvas");
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          const ctx = canvas.getContext("2d")!;
+          ctx.drawImage(bitmap, 0, 0);
+          bitmap.close();
+          return {
+            width: canvas.width,
+            height: canvas.height,
+            pixels: Array.from(
+              new Uint8Array(
+                await crypto.subtle.digest(
+                  "SHA-256",
+                  ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+                ),
+              ),
+            ),
+            types: item.types,
+          };
+        });
+        expect(actual.types).not.toContain("text/plain");
+        expect({
+          width: actual.width,
+          height: actual.height,
+          pixels: actual.pixels,
+        }).toEqual(expected);
+        await page.evaluate(() => {
+          const target = document.createElement("div");
+          target.id = "image-paste-target";
+          target.contentEditable = "true";
+          target.addEventListener("paste", (event) => {
+            event.preventDefault();
+            const image = event.clipboardData?.files[0];
+            target.dataset.pastedType = image?.type ?? "no image";
+          });
+          document.body.append(target);
+          target.focus();
+        });
+        await page.keyboard.press("Control+v");
+        await expect(page.locator("#image-paste-target")).toHaveAttribute(
+          "data-pasted-type",
+          "image/png",
+        );
+        await page
+          .locator("#image-paste-target")
+          .evaluate((target) => target.remove());
+      }
+      await page
+        .getByRole("button", { name: "Copy file path", exact: true })
+        .click();
+      await expect
+        .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+        .toBe(file);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("failed image copying reports the failure without replacing the clipboard with a path", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await go(page, join(fixture, "References", "Aether-light.jpg"));
+  const image = page.locator(".ff-image-stage img");
+  await expect
+    .poll(() =>
+      image.evaluate(
+        (img: HTMLImageElement) => img.complete && img.naturalWidth > 0,
+      ),
+    )
+    .toBe(true);
+  const url = await image.getAttribute("src");
+  await page.route(url!, (route) =>
+    route.fulfill({ status: 404, body: "missing" }),
+  );
+  await page.evaluate(() =>
+    navigator.clipboard.writeText("clipboard sentinel"),
+  );
+  await page.getByRole("button", { name: "Copy image", exact: true }).click();
+  await expect(page.locator(".ff-error")).toContainText(
+    "Image request failed (404)",
+  );
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    "clipboard sentinel",
+  );
+});
+
+test("BB built-in image preview and full-screen viewer copy pasteable images", async ({
+  page,
+  context,
+}) => {
+  const threadId = process.env.BB_THREAD_ID;
+  test.skip(
+    !threadId,
+    "Set BB_THREAD_ID to exercise the built-in image viewers.",
+  );
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const response = await page.request.post(
+    "/api/v1/plugins/files/rpc/context",
+    { data: { threadId, projectId: null } },
+  );
+  const workspace = (await response.json()).result;
+  const root = await mkdtemp(join(workspace.path, "image-clipboard-test-"));
+  const file = join(root, "clipboard-image.jpg");
+  await copyFile(join(fixture, "References", "Aether-light.jpg"), file);
+  let opened = false;
+  try {
+    await page.evaluate(() =>
+      localStorage.setItem(
+        "bb.fileOpenerByExtension",
+        JSON.stringify({ jpg: "__builtin__" }),
+      ),
+    );
+    await page.goto(`/threads/${threadId}`);
+    const show = page.getByRole("button", {
+      name: "Show right panel (Ctrl + J)",
+      exact: true,
+    });
+    await expect(
+      page.getByRole("button", {
+        name: /(?:Show|Hide) right panel \(Ctrl \+ J\)/,
+      }),
+    ).toBeVisible();
+    if (await show.isVisible()) await show.click();
+    await page
+      .getByRole("button", { name: "Open new tab (Ctrl + T)", exact: true })
+      .click();
+    const search = page.getByRole("combobox", { name: /Search files/ });
+    await search.fill(root.split("/").at(-1)! + "/clipboard-image.jpg");
+    await expect(
+      page
+        .getByRole("option")
+        .filter({ hasText: "clipboard-image.jpg" })
+        .first(),
+    ).toBeVisible();
+    await search.press("Enter");
+    opened = true;
+    await expect(page.locator(".ff-browser")).toHaveCount(0);
+    const preview = page.getByRole("button", {
+      name: /Open .*clipboard-image.jpg in full screen preview/,
+    });
+    await expect(preview).toBeVisible();
+    const original = await preview
+      .locator("img")
+      .evaluate(async (img: HTMLImageElement) => {
+        await img.decode();
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0);
+        return {
+          width: canvas.width,
+          height: canvas.height,
+          pixels: Array.from(
+            new Uint8Array(
+              await crypto.subtle.digest(
+                "SHA-256",
+                ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+              ),
+            ),
+          ),
+        };
+      });
+    for (const action of ["preview", "lightbox", "keyboard"]) {
+      await page.evaluate(() => navigator.clipboard.writeText("sentinel"));
+      if (action === "preview")
+        await page
+          .getByRole("button", { name: "Copy image", exact: true })
+          .click();
+      else if (action === "lightbox") {
+        await preview.click();
+        await page
+          .getByRole("dialog")
+          .getByRole("button", { name: "Copy image", exact: true })
+          .click();
+      } else {
+        await page.getByRole("dialog").focus();
+        await page.keyboard.press("Control+c");
+      }
+      await expect
+        .poll(() =>
+          page.evaluate(
+            async () => (await navigator.clipboard.read())[0].types,
+          ),
+        )
+        .toContain("image/png");
+      const copied = await page.evaluate(async () => {
+        const item = (await navigator.clipboard.read())[0];
+        const bitmap = await createImageBitmap(await item.getType("image/png"));
+        const canvas = document.createElement("canvas");
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
+        return {
+          width: canvas.width,
+          height: canvas.height,
+          pixels: Array.from(
+            new Uint8Array(
+              await crypto.subtle.digest(
+                "SHA-256",
+                ctx.getImageData(0, 0, canvas.width, canvas.height).data,
+              ),
+            ),
+          ),
+        };
+      });
+      expect(copied).toEqual(original);
+    }
+    await page.getByRole("button", { name: "Close image preview" }).click();
+  } finally {
+    if (opened) {
+      await page
+        .getByRole("button", { name: "clipboard-image.jpg", exact: true })
+        .last()
+        .hover();
+      await page
+        .getByRole("button", { name: "Close clipboard-image.jpg", exact: true })
+        .last()
+        .click();
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("copying preview text preserves the selection and file-list copy still copies paths", async ({
   page,
   context,

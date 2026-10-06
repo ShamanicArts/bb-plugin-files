@@ -34,6 +34,7 @@ import { Glyph, FileGlyph } from "./icons";
 import { SUPPORTED_EXTENSIONS } from "./supported-files";
 import { SafeVideo } from "./safe-video";
 import { HtmlPreview, HtmlSessionLayer } from "./html-session";
+import { copyImage } from "./copy-image";
 import "./app.css";
 type View = "list" | "grid" | "columns";
 type Location = { hostId: string; path: string };
@@ -180,6 +181,7 @@ function Preview({
   hasPrevious,
   hasNext,
   onCopy,
+  onCopyImage,
   onUse,
   lineRange,
   refreshRevision,
@@ -199,6 +201,7 @@ function Preview({
   hasPrevious: boolean;
   hasNext: boolean;
   onCopy: () => void;
+  onCopyImage: () => void;
   onUse: (paths: string[]) => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
@@ -524,6 +527,14 @@ function Preview({
                   onClick={() => setWrap(!wrap)}
                 />
               )}
+            {kind === "image" && (
+              <Tool
+                icon="copy"
+                label="Copy image"
+                onClick={onCopyImage}
+                disabled={!url || mediaError}
+              />
+            )}
             <Tool icon="copy" label="Copy file path" onClick={onCopy} />
             {kind !== "video" && kind !== "audio" && (
               <Tool
@@ -1040,6 +1051,17 @@ function FilesBrowser({
     setView(next);
     if (listRef.current) listRef.current.scrollTop = 0;
   };
+  const copyCurrentImage = async () => {
+    if (!current || !base) return;
+    try {
+      await copyImage(assetUrl(base, current.name, current.modified));
+      setNotice("Image copied");
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "Could not copy image.",
+      );
+    }
+  };
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented) return;
     const input =
@@ -1104,6 +1126,17 @@ function FilesBrowser({
       const selection = event.currentTarget.ownerDocument.getSelection();
       if (selection && !selection.isCollapsed && selection.toString()) return;
       event.preventDefault();
+      if (
+        current &&
+        fileKind(current) === "image" &&
+        previewOpen &&
+        (expanded ||
+          (event.target instanceof HTMLElement &&
+            event.target.closest(".ff-preview")))
+      ) {
+        void copyCurrentImage();
+        return;
+      }
       void copy(
         selected.size ? [...selected] : location ? [location.path] : [],
       );
@@ -1543,6 +1576,7 @@ function FilesBrowser({
             hasPrevious={fileIndex > 0}
             hasNext={fileIndex >= 0 && fileIndex < files.length - 1}
             onCopy={() => void copy([current.path])}
+            onCopyImage={() => void copyCurrentImage()}
             onUse={usePaths}
           />
         ) : (

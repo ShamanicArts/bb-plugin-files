@@ -5,6 +5,7 @@ A compact, path-first file browser and picker. Open **Files** from the sidebar, 
 - Editable absolute, relative, `~`, and `file://` paths, breadcrumbs, back/forward, and parent navigation.
 - List, thumbnail grid, and two-column directory navigation. Large lists render only the visible rows.
 - Formatted Markdown and source previews with BB's syntax highlighting, image fit/actual size, video and audio playback, and next/previous file browsing.
+- **Copy image** puts full-resolution image pixels on the clipboard for pasting. PNG transparency is preserved; other image formats are converted to PNG. **Copy file path** remains a separate action.
 - Folder filtering, hidden files, name/modified/size sorting, persistent bookmarks and view preference.
 - Multi-select with Ctrl/Cmd-click, Shift-click, or Ctrl/Cmd-A. Copy paths or **Use in chat** to insert quoted paths into the draft. This does not send a message or upload attachments.
 - An explicit machine selector for local and remote BB hosts.
@@ -59,7 +60,7 @@ Files claims only known previewable extensions. Extensionless files can be brows
 | Space | Expand/collapse quick look |
 | Escape | Collapse quick look, clear filter, or close preview |
 | Ctrl/Cmd Enter | Insert selected paths into chat |
-| Ctrl/Cmd C | Copy selected text, otherwise selected paths |
+| Ctrl/Cmd C | Copy selected text; in an image preview, copy the image; in the file list, copy selected paths |
 | Ctrl/Cmd . | Show hidden files |
 | Ctrl/Cmd 1 / 2 / 3 | List / grid / columns |
 | F5 | Refresh directory |
